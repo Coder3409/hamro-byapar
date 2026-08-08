@@ -1,32 +1,47 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, Bot, Check, Edit3, Keyboard, Mic, MicOff, PackagePlus, RotateCcw, Sparkles, Volume2, X } from 'lucide-react';
 import { money } from '../../utils/analytics.js';
 import { answerVoiceQuestion, calculateVoiceSale, parseVoiceCommand } from '../../utils/voiceParser.js';
+import { configureRecognition, getSpeechRecognitionConstructor, microphoneErrorKey, recognitionErrorKey, recognitionLanguage, requestMicrophonePermission, shouldFallbackRecognitionLanguage } from '../../utils/speechRecognition.js';
 
-export default function VoiceAssistant({ products, sales, lang, t, onClose, onSave, onUndo }) {
+const ERROR_HELP = {
+  voicePermissionDenied: 'voicePermissionHelp',
+  voiceUnsupported: 'voiceUnsupportedHelp',
+  voiceNetworkError: 'voiceNetworkHelp',
+  voiceLanguageUnsupported: 'voiceLanguageHelp',
+};
+
+export default function VoiceAssistant({ products, sales, lang, t, onClose, onSave, onUndo, autoStart = false }) {
   const [mode, setMode] = useState('idle');
   const [transcript, setTranscript] = useState('');
   const [parsed, setParsed] = useState(null);
   const [form, setForm] = useState(null);
   const [answer, setAnswer] = useState(null);
+  const [voiceError, setVoiceError] = useState(null);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
   const [inventoryChoice, setInventoryChoice] = useState(null);
   const [savedSale, setSavedSale] = useState(null);
   const recognitionRef = useRef(null);
   const transcriptRef = useRef('');
-  const speechSupported = typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const finalTranscriptRef = useRef('');
+  const recognitionStateRef = useRef('idle');
+  const recognitionSessionRef = useRef(0);
+  const fallbackAttemptedRef = useRef(false);
+  const autoStartedRef = useRef(false);
+  const closingRef = useRef(false);
+  const manualInputRef = useRef(null);
+  const speechSupported = Boolean(getSpeechRecognitionConstructor(typeof window === 'undefined' ? null : window));
   const examples = lang === 'ne'
     ? ['मैले ५ वटा साबुन ३० मा किनेँ र ४५ मा बेचेँ।', 'आजको बिक्री कति छ?', 'कुन सामानको स्टक कम छ?']
     : ['10 packet noodles 20 ma kine, 25 ma beche.', 'I bought 5 soaps for 30 and sold them for 45.', 'Aaja ko sales kati cha?'];
 
-  const reset = () => { setMode('idle'); setTranscript(''); transcriptRef.current = ''; setParsed(null); setForm(null); setAnswer(null); setError(''); setEditing(false); setInventoryChoice(null); setSavedSale(null); };
-  const close = () => { recognitionRef.current?.abort?.(); onClose(); };
-
-  const processTranscript = (value) => {
+  const processTranscript = useCallback((value) => {
     const spoken = value.trim();
     if (!spoken) { setError(t('voiceNeedTranscript')); return; }
-    setError(''); setMode('processing');
+    setError('');
+    setVoiceError(null);
+    setMode('processing');
     window.setTimeout(() => {
       const result = parseVoiceCommand(spoken, products);
       setParsed(result);
@@ -35,35 +50,158 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
         setMode('question');
         return;
       }
+      if (!result.product && result.purchasePrice == null && result.sellingPrice == null && result.confidence <= 25) {
+        setVoiceError('voiceParserFailed');
+        setMode('error');
+        return;
+      }
       const productId = result.matchConfidence >= 0.58 ? result.product?.id || '' : '';
       setForm({ productId, productName: result.productName, quantity: result.quantity, purchasePrice: result.purchasePrice ?? '', sellingPrice: result.sellingPrice ?? '' });
       setEditing(result.missing.length > 0 || result.matchConfidence < 0.58);
       setInventoryChoice(result.product ? 'existing' : null);
       setMode('review');
     }, 520);
-  };
+  }, [lang, products, sales, t]);
 
-  const startListening = () => {
-    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Recognition) { setError(t('voiceUnavailable')); setMode('idle'); return; }
-    setError(''); setTranscript(''); transcriptRef.current = '';
-    const recognition = new Recognition();
-    recognition.lang = lang === 'ne' ? 'ne-NP' : 'en-US';
-    recognition.interimResults = true;
-    recognition.continuous = false;
-    recognition.onstart = () => setMode('listening');
-    recognition.onresult = (event) => {
-      let next = '';
-      for (let index = event.resultIndex; index < event.results.length; index += 1) next += event.results[index][0].transcript;
-      transcriptRef.current = next;
-      setTranscript(next);
+  const startListening = useCallback(async ({ skipPermission = false, locale = recognitionLanguage(lang), preserveTranscript = false } = {}) => {
+    const session = recognitionSessionRef.current + 1;
+    recognitionSessionRef.current = session;
+    const Recognition = getSpeechRecognitionConstructor(window);
+    if (!Recognition) {
+      setVoiceError('voiceUnsupported');
+      setMode('error');
+      return;
+    }
+
+    closingRef.current = false;
+    recognitionStateRef.current = 'starting';
+    setVoiceError(null);
+    setError('');
+    setMode('starting');
+    if (!preserveTranscript) {
+      setTranscript('');
+      transcriptRef.current = '';
+      finalTranscriptRef.current = '';
+      fallbackAttemptedRef.current = false;
+    }
+
+    if (!skipPermission) {
+      try {
+        await requestMicrophonePermission(window.navigator?.mediaDevices);
+      } catch (permissionError) {
+        setVoiceError(microphoneErrorKey(permissionError));
+        recognitionStateRef.current = 'errored';
+        setMode('error');
+        return;
+      }
+    }
+
+    if (closingRef.current || session !== recognitionSessionRef.current) return;
+    const recognition = configureRecognition(new Recognition(), locale);
+    recognition.onstart = () => {
+      if (session !== recognitionSessionRef.current) return;
+      recognitionStateRef.current = 'listening';
+      setMode('listening');
     };
-    recognition.onerror = () => { setError(t('voiceUnavailable')); setMode('idle'); };
-    recognition.onend = () => { if (transcriptRef.current.trim()) processTranscript(transcriptRef.current); else setMode('idle'); };
+    recognition.onaudiostart = () => { if (session === recognitionSessionRef.current) setMode('listening'); };
+    recognition.onresult = (event) => {
+      if (session !== recognitionSessionRef.current) return;
+      let finalText = '';
+      let interimText = '';
+      for (let index = 0; index < event.results.length; index += 1) {
+        const text = event.results[index][0]?.transcript || '';
+        if (event.results[index].isFinal) finalText += `${text} `;
+        else interimText += `${text} `;
+      }
+      finalTranscriptRef.current = finalText.trim();
+      const liveTranscript = `${finalText}${interimText}`.trim();
+      transcriptRef.current = liveTranscript;
+      setTranscript(liveTranscript);
+    };
+    recognition.onerror = (event) => {
+      if (closingRef.current || session !== recognitionSessionRef.current) return;
+      if (shouldFallbackRecognitionLanguage(event.error, lang, fallbackAttemptedRef.current)) {
+        fallbackAttemptedRef.current = true;
+        recognitionStateRef.current = 'fallback';
+        setMode('starting');
+        return;
+      }
+      recognitionStateRef.current = 'errored';
+      setVoiceError(recognitionErrorKey(event.error));
+      setMode('error');
+    };
+    recognition.onend = () => {
+      if (session !== recognitionSessionRef.current) return;
+      recognitionRef.current = null;
+      if (closingRef.current) return;
+      if (recognitionStateRef.current === 'fallback') {
+        startListening({ skipPermission: true, locale: 'en-US', preserveTranscript: true });
+        return;
+      }
+      if (recognitionStateRef.current === 'errored') return;
+      const spoken = transcriptRef.current.trim() || finalTranscriptRef.current.trim();
+      recognitionStateRef.current = 'ended';
+      if (spoken) processTranscript(spoken);
+      else {
+        setVoiceError('voiceNoSpeech');
+        setMode('error');
+      }
+    };
     recognitionRef.current = recognition;
-    try { recognition.start(); } catch { setError(t('voiceUnavailable')); setMode('idle'); }
-  };
+    try {
+      recognition.start();
+    } catch (startError) {
+      if (session !== recognitionSessionRef.current) return;
+      recognitionRef.current = null;
+      recognitionStateRef.current = 'errored';
+      setVoiceError(microphoneErrorKey(startError));
+      setMode('error');
+    }
+  }, [lang, processTranscript]);
 
+  useEffect(() => {
+    if (autoStart && !autoStartedRef.current) {
+      autoStartedRef.current = true;
+      startListening();
+    }
+  }, [autoStart, startListening]);
+
+  useEffect(() => () => {
+    closingRef.current = true;
+    recognitionSessionRef.current += 1;
+    recognitionStateRef.current = 'closing';
+    recognitionRef.current?.abort?.();
+  }, []);
+
+  const reset = () => {
+    recognitionSessionRef.current += 1;
+    recognitionRef.current?.abort?.();
+    recognitionStateRef.current = 'idle';
+    setMode('idle');
+    setTranscript('');
+    transcriptRef.current = '';
+    finalTranscriptRef.current = '';
+    setParsed(null);
+    setForm(null);
+    setAnswer(null);
+    setVoiceError(null);
+    setError('');
+    setEditing(false);
+    setInventoryChoice(null);
+    setSavedSale(null);
+  };
+  const close = () => {
+    closingRef.current = true;
+    recognitionSessionRef.current += 1;
+    recognitionStateRef.current = 'closing';
+    recognitionRef.current?.abort?.();
+    onClose();
+  };
+  const enterManually = () => {
+    setVoiceError(null);
+    setMode('idle');
+    window.setTimeout(() => manualInputRef.current?.focus(), 0);
+  };
   const stopListening = () => recognitionRef.current?.stop?.();
   const selected = products.find((product) => product.id === form?.productId);
   const calculation = form ? calculateVoiceSale(form) : null;
@@ -77,7 +215,8 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
       purchasePrice: Number(form.purchasePrice), price: Number(form.sellingPrice), discount: 0, total: calculation.revenue,
       source: 'voice', addToInventory: inventoryChoice === 'add',
     });
-    setSavedSale(sale); setMode('saved');
+    setSavedSale(sale);
+    setMode('saved');
   };
 
   return <div className="voice-backdrop" onMouseDown={(event) => event.target === event.currentTarget && close()}>
@@ -87,16 +226,18 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
       {mode === 'idle' && <div className="voice-idle">
         <div className="voice-orb"><Mic/><i/><i/><i/></div>
         <h2>{t('speakSale')}</h2><p>{t('voiceIntro')}</p>
-        <button className="voice-start" onClick={startListening}><Mic/>{t('startSpeaking')}</button>
-        {!speechSupported && <div className="voice-notice"><AlertCircle/><span>{t('voiceUnavailable')}</span></div>}
+        <button className="voice-start" onClick={() => startListening()} disabled={!speechSupported}><Mic/>{t('startSpeaking')}</button>
+        {!speechSupported && <div className="voice-notice"><AlertCircle/><span>{t('voiceUnsupported')}</span></div>}
         <div className="voice-divider"><span>{t('typeInstead')}</span></div>
-        <div className="transcript-entry"><Keyboard/><textarea value={transcript} onChange={(event) => { setTranscript(event.target.value); transcriptRef.current = event.target.value; }} placeholder={t('transcriptPlaceholder')}/></div>
+        <div className="transcript-entry"><Keyboard/><textarea ref={manualInputRef} value={transcript} onChange={(event) => { setTranscript(event.target.value); transcriptRef.current = event.target.value; }} placeholder={t('transcriptPlaceholder')}/></div>
         {error && <p className="voice-error">{error}</p>}
         <button className="button primary voice-understand" onClick={() => processTranscript(transcript)}><Sparkles/>{t('understand')}</button>
         <div className="voice-examples"><strong>{t('trySaying')}</strong>{examples.map((example) => <button key={example} onClick={() => { setTranscript(example); transcriptRef.current = example; processTranscript(example); }}>“{example}”</button>)}</div>
       </div>}
 
-      {mode === 'listening' && <div className="voice-listening"><div className="listening-mic"><Mic/><span/><span/><span/></div><h2>{t('listening')}</h2><p>{t('listeningHelp')}</p><blockquote>{transcript || t('listeningPlaceholder')}</blockquote><div className="sound-wave">{Array.from({ length: 18 }, (_, index) => <i key={index}/>)}</div><button className="button secondary" onClick={stopListening}><MicOff/>{t('stopListening')}</button></div>}
+      {(mode === 'starting' || mode === 'listening') && <div className="voice-listening" aria-live="polite"><div className="listening-mic"><Mic/><span/><span/><span/></div><h2>{t(mode === 'starting' ? 'startingMicrophone' : 'listening')}</h2><p>{t(mode === 'starting' ? 'startingMicrophoneHelp' : 'listeningHelp')}</p><blockquote>{transcript || t('listeningPlaceholder')}</blockquote><div className="sound-wave">{Array.from({ length: 18 }, (_, index) => <i key={index}/>)}</div>{mode === 'listening' && <button className="button secondary" onClick={stopListening}><MicOff/>{t('stopListening')}</button>}</div>}
+
+      {mode === 'error' && voiceError && <div className="voice-error-state" role="alert"><span><AlertCircle/></span><h2>{t(voiceError)}</h2>{ERROR_HELP[voiceError] && <p>{t(ERROR_HELP[voiceError])}</p>}<div className="voice-error-actions">{speechSupported && <button className="button primary" onClick={() => startListening()}><RotateCcw/>{t('tryAgain')}</button>}<button className="button secondary" onClick={enterManually}><Keyboard/>{t('enterManually')}</button></div></div>}
 
       {mode === 'processing' && <div className="voice-processing"><div className="processing-mark"><Bot/><i/></div><h2>{t('understandingSale')}</h2><p>“{transcript}”</p><div className="processing-dots"><i/><i/><i/></div></div>}
 
@@ -113,7 +254,7 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
         <div className="voice-actions"><button className="button secondary" onClick={reset}>{t('cancel')}</button><button className="button secondary" onClick={() => setEditing(!editing)}><Edit3/>{editing ? t('doneEditing') : t('edit')}</button><button className="button primary" disabled={incomplete || needsInventoryChoice} onClick={save}><Check/>{t('saveVoiceSale')}</button></div>
       </div>}
 
-      {mode === 'saved' && savedSale && <div className="voice-saved"><div className="saved-check"><Check/></div><h2>{t('saleSaved')}</h2><strong>{lang === 'ne' ? savedSale.productNameNe : savedSale.productName} × {savedSale.quantity}</strong><p>{t('profit')}: <b>+{money(savedSale.total - savedSale.cost, lang)}</b></p><div className="saved-insight"><Bot/><span>{t('voiceSavedInsight').replace('{product}', lang === 'ne' ? savedSale.productNameNe : savedSale.productName).replace('{profit}', money(savedSale.total - savedSale.cost, lang))}</span></div><div className="voice-actions"><button className="button secondary" onClick={() => { onUndo(savedSale); setSavedSale(null); setMode('idle'); }}><RotateCcw/>{t('undo')}</button><button className="button primary" onClick={close}><Check/>{t('done')}</button></div></div>}
+      {mode === 'saved' && savedSale && <div className="voice-saved"><div className="saved-check"><Check/></div><h2>{t('saleSaved')}</h2><strong>{lang === 'ne' ? savedSale.productNameNe : savedSale.productName} × {savedSale.quantity}</strong><p>{t('profit')}: <b>{savedSale.total - savedSale.cost >= 0 ? '+' : ''}{money(savedSale.total - savedSale.cost, lang)}</b></p><div className="saved-insight"><Bot/><span>{t('voiceSavedInsight').replace('{product}', lang === 'ne' ? savedSale.productNameNe : savedSale.productName).replace('{profit}', money(savedSale.total - savedSale.cost, lang))}</span></div><div className="voice-actions"><button className="button secondary" onClick={() => { onUndo(savedSale); setSavedSale(null); setMode('idle'); }}><RotateCcw/>{t('undo')}</button><button className="button primary" onClick={close}><Check/>{t('done')}</button></div></div>}
     </section>
   </div>;
 }

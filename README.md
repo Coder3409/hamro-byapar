@@ -11,6 +11,7 @@ A bilingual, offline-first business intelligence assistant designed for small sh
 - Three-tap quick-sale flow with instant stock and profit updates
 - Hamro Voice for confirmed English, Nepali, Romanized Nepali, and mixed-language sales
 - Voice-powered business questions, editable sale review, inventory matching, and one-tap undo
+- Permission-aware browser speech recognition with live transcripts and a fully local manual fallback (Chrome recommended)
 - Local rule-based Hamro AI insights that work without an API
 - IndexedDB storage with a LocalStorage fallback
 - Responsive desktop sidebar and mobile bottom navigation
