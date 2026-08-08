@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { createEmailService } from '../server/emailService.js';
+import { buildStockAlertEmail } from '../server/emailTemplates.js';
 import { createDemoSales, demoProducts } from '../src/data/demo.js';
 import { officialSlogan, translate } from '../src/i18n/translations.js';
 import { chartData, getInsights, money, summarize } from '../src/utils/analytics.js';
@@ -79,5 +81,31 @@ await assert.rejects(
   requestMicrophonePermission({ getUserMedia: () => new Promise(() => undefined) }, 5),
   (permissionError) => permissionError.name === 'PermissionTimeoutError',
 );
+
+const lowStockEmail = buildStockAlertEmail({
+  alertType: 'low_stock', product: { id: 'p-test', name: 'Coca-Cola', category: 'Beverage', stock: 4, lowStock: 5 }, shop: { name: 'Asha Kirana Pasal' }, manageUrl: 'http://localhost:4173#inventory',
+});
+assert.match(lowStockEmail.subject, /Low Stock Alert - Coca-Cola/);
+assert.match(lowStockEmail.html, /Current stock/);
+assert.match(lowStockEmail.html, /4 units/);
+assert.match(lowStockEmail.text, /Minimum Stock: 5 units/);
+const outOfStockEmail = buildStockAlertEmail({
+  alertType: 'out_of_stock', product: { id: 'p-test', name: 'Coca-Cola', category: 'Beverage', stock: 0, lowStock: 5 }, shop: { name: 'Asha Kirana Pasal' },
+});
+assert.match(outOfStockEmail.subject, /Out of Stock - Coca-Cola/);
+assert.match(outOfStockEmail.text, /currently out of stock/);
+
+const sentMessages = [];
+const emailService = createEmailService(
+  { EMAIL_USER: 'sender@example.com', EMAIL_APP_PASSWORD: 'test-only-placeholder', ALERT_EMAIL: 'hbyapar@gmail.com' },
+  () => ({ sendMail: async (message) => { sentMessages.push(message); return { messageId: 'test-message-id' }; } }),
+);
+const stockAlertPayload = { alertId: 'alert-test-123', alertType: 'low_stock', product: { id: 'p-test', name: 'Coca-Cola', category: 'Beverage', stock: 4, lowStock: 5 }, shop: { name: 'Asha Kirana Pasal' } };
+assert.equal((await emailService.sendStockAlert(stockAlertPayload)).delivered, true);
+assert.equal((await emailService.sendStockAlert(stockAlertPayload)).duplicate, true);
+assert.equal(sentMessages.length, 1);
+assert.equal(sentMessages[0].to, 'hbyapar@gmail.com');
+const unconfiguredEmail = createEmailService({}, () => { throw new Error('Transport should not be created.'); });
+assert.deepEqual(await unconfiguredEmail.sendStockAlert(stockAlertPayload), { delivered: false, reason: 'not_configured' });
 
 console.log('Hamro Byapar smoke tests passed.');
