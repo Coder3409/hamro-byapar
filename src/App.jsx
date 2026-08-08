@@ -18,7 +18,7 @@ const nav = [
 ];
 
 function Logo({ compact = false }) {
-  return <div className="brand-lockup"><div className="logo-mark"><Store size={23} /><span className="logo-bars"><i /><i /><i /></span></div>{!compact && <div><strong>Hamro Byapar</strong><small>{officialSlogan}</small></div>}</div>;
+  return <div className="brand-lockup"><img className="brand-logo" src="/assets/hamro-byapar-logo.jpeg" alt="Hamro Byapar" />{!compact && <div><strong>Hamro Byapar</strong><small>{officialSlogan}</small></div>}</div>;
 }
 
 function Button({ children, variant = 'primary', className = '', ...props }) {
