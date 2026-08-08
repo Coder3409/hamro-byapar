@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { createEmailService } from '../server/emailService.js';
 import { buildStockAlertEmail } from '../server/emailTemplates.js';
 import { createDemoSales, demoProducts } from '../src/data/demo.js';
@@ -12,7 +13,7 @@ import { answerVoiceQuestion, calculateVoiceSale, parseVoiceCommand } from '../s
 const sales = createDemoSales();
 const summary = summarize(sales, demoProducts);
 
-assert.equal(officialSlogan, 'Hamro Byapar — व्यापार बुझौं, व्यवसाय बढाऔं');
+assert.equal(officialSlogan, 'व्यापार बुझौं | व्यवसाय बढाऔं');
 assert.equal(demoProducts.length, 12);
 assert.equal(sales.length, 157);
 assert.equal(summary.transactions, 12);
@@ -22,7 +23,15 @@ assert.equal(chartData(sales, 'revenue', 7).length, 7);
 assert.equal(getInsights(sales, demoProducts, 'en').cards.length, 3);
 assert.match(getInsights(sales, demoProducts, 'ne').cards[1].action, /स्टक/);
 assert.equal(translate('ne', 'dashboard'), 'ड्यासबोर्ड');
+assert.equal(translate('en', 'customers'), 'Customers');
+assert.equal(translate('ne', 'reports'), 'रिपोर्ट');
+assert.match(translate('ne', 'aiCompanion'), /व्यवसायिक साथी/);
 assert.match(money(12450, 'en'), /12,450/);
+
+const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
+assert.equal(manifest.theme_color, '#061b3a');
+assert.equal(manifest.icons[0].src, '/assets/hamro-byapar-logo.jpeg');
+assert.ok((await readFile(new URL('../public/assets/hamro-byapar-logo.jpeg', import.meta.url))).byteLength > 100_000);
 
 const romanized = parseVoiceCommand('Maile noodles 18 ma kine ani 25 ma beche.', demoProducts);
 assert.equal(romanized.kind, 'sale');

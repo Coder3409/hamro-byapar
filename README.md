@@ -1,6 +1,6 @@
 # Hamro Byapar
 
-**Hamro Byapar — व्यापार बुझौं, व्यवसाय बढाऔं**
+**Hamro Byapar — व्यापार बुझौं | व्यवसाय बढाऔं**
 
 A bilingual, offline-first business intelligence assistant designed for small shops and local businesses in Nepal.
 
@@ -94,4 +94,4 @@ npm run build
 
 The supplied official logo is stored at `public/assets/hamro-byapar-logo.jpeg`. The exact official slogan used throughout the app is:
 
-> **Hamro Byapar — व्यापार बुझौं, व्यवसाय बढाऔं**
+> **व्यापार बुझौं | व्यवसाय बढाऔं**
