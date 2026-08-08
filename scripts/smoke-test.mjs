@@ -3,8 +3,10 @@ import { createEmailService } from '../server/emailService.js';
 import { buildStockAlertEmail } from '../server/emailTemplates.js';
 import { createDemoSales, demoProducts } from '../src/data/demo.js';
 import { officialSlogan, translate } from '../src/i18n/translations.js';
+import { sendStockAlertEmail } from '../src/services/notifications.js';
 import { chartData, getInsights, money, summarize } from '../src/utils/analytics.js';
 import { configureRecognition, getSpeechRecognitionConstructor, microphoneErrorKey, recognitionErrorKey, recognitionLanguage, requestMicrophonePermission, shouldFallbackRecognitionLanguage } from '../src/utils/speechRecognition.js';
+import { createStockAlertBaseline, evaluateStockAlerts, resolveNotifications, stockAlertLevel, updateNotificationEmailStatus } from '../src/utils/stockAlerts.js';
 import { answerVoiceQuestion, calculateVoiceSale, parseVoiceCommand } from '../src/utils/voiceParser.js';
 
 const sales = createDemoSales();
@@ -107,5 +109,50 @@ assert.equal(sentMessages.length, 1);
 assert.equal(sentMessages[0].to, 'hbyapar@gmail.com');
 const unconfiguredEmail = createEmailService({}, () => { throw new Error('Transport should not be created.'); });
 assert.deepEqual(await unconfiguredEmail.sendStockAlert(stockAlertPayload), { delivered: false, reason: 'not_configured' });
+
+const stockedProduct = { id: 'stock-test', name: 'Test Rice', nameNe: 'परीक्षण चामल', category: 'Grocery', stock: 12, lowStock: 5 };
+assert.equal(stockAlertLevel(stockedProduct), 'normal');
+assert.equal(stockAlertLevel({ ...stockedProduct, stock: 5 }), 'low_stock');
+assert.equal(stockAlertLevel({ ...stockedProduct, stock: 0 }), 'out_of_stock');
+let stockStates = createStockAlertBaseline([stockedProduct]);
+let stockResult = evaluateStockAlerts([stockedProduct], stockStates, '2026-08-08T01:00:00.000Z');
+assert.equal(stockResult.alerts.length, 0, 'unchanged healthy stock must not create an alert');
+stockResult = evaluateStockAlerts([{ ...stockedProduct, stock: 4 }], stockResult.states, '2026-08-08T01:01:00.000Z');
+assert.equal(stockResult.alerts.length, 1);
+assert.equal(stockResult.alerts[0].alertType, 'low_stock');
+const firstLowStockAlert = stockResult.alerts[0];
+stockResult = evaluateStockAlerts([{ ...stockedProduct, stock: 4 }], stockResult.states, '2026-08-08T01:02:00.000Z');
+assert.equal(stockResult.alerts.length, 0, 'unchanged low stock must not send a duplicate');
+stockResult = evaluateStockAlerts([{ ...stockedProduct, stock: 0 }], stockResult.states, '2026-08-08T01:03:00.000Z');
+assert.equal(stockResult.alerts[0].alertType, 'out_of_stock');
+assert.deepEqual(stockResult.resolvedAlertIds, [firstLowStockAlert.id]);
+const outOfStockAlert = stockResult.alerts[0];
+stockResult = evaluateStockAlerts([{ ...stockedProduct, stock: 0 }], stockResult.states, '2026-08-08T01:04:00.000Z');
+assert.equal(stockResult.alerts.length, 0, 'unchanged zero stock must not send a duplicate');
+stockResult = evaluateStockAlerts([{ ...stockedProduct, stock: 20 }], stockResult.states, '2026-08-08T01:05:00.000Z');
+assert.equal(stockResult.alerts.length, 0);
+assert.deepEqual(stockResult.resolvedAlertIds, [outOfStockAlert.id]);
+stockResult = evaluateStockAlerts([{ ...stockedProduct, stock: 3 }], stockResult.states, '2026-08-08T01:06:00.000Z');
+assert.equal(stockResult.alerts.length, 1, 'restocking must reset the alert cycle');
+assert.notEqual(stockResult.alerts[0].id, firstLowStockAlert.id);
+const secondLowStockAlert = stockResult.alerts[0];
+assert.equal(resolveNotifications([firstLowStockAlert], [firstLowStockAlert.id], '2026-08-08T01:07:00.000Z')[0].isResolved, true);
+assert.equal(updateNotificationEmailStatus([secondLowStockAlert], secondLowStockAlert.id, 'sent')[0].emailSent, true);
+stockResult = evaluateStockAlerts([], stockResult.states, '2026-08-08T01:08:00.000Z');
+assert.deepEqual(stockResult.resolvedAlertIds, [secondLowStockAlert.id], 'removing a product must resolve its active notification');
+
+let postedAlert;
+const delivered = await sendStockAlertEmail(secondLowStockAlert, { ...stockedProduct, stock: 3 }, { shopName: 'Asha Kirana Pasal', ownerName: 'Asha Shrestha' }, async (url, options) => {
+  postedAlert = { url, options, body: JSON.parse(options.body) };
+  return { ok: true, json: async () => ({ ok: true, delivered: true }) };
+});
+assert.equal(delivered.delivered, true);
+assert.equal(postedAlert.url, '/api/alerts/stock');
+assert.equal(postedAlert.body.product.stock, 3);
+assert.equal('EMAIL_APP_PASSWORD' in postedAlert.body, false, 'email credentials must never enter the browser payload');
+await assert.rejects(
+  sendStockAlertEmail(secondLowStockAlert, { ...stockedProduct, stock: 3 }, { shopName: 'Asha Kirana Pasal', ownerName: 'Asha Shrestha' }, async () => ({ ok: false, json: async () => ({ error: 'SMTP unavailable' }) })),
+  /SMTP unavailable/,
+);
 
 console.log('Hamro Byapar smoke tests passed.');
