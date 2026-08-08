@@ -6,9 +6,14 @@ import { configureRecognition, getSpeechRecognitionConstructor, microphoneErrorK
 
 const ERROR_HELP = {
   voicePermissionDenied: 'voicePermissionHelp',
+  voicePermissionTimeout: 'voicePermissionHelp',
   voiceUnsupported: 'voiceUnsupportedHelp',
   voiceNetworkError: 'voiceNetworkHelp',
   voiceLanguageUnsupported: 'voiceLanguageHelp',
+};
+
+const voiceDebug = (event, details = {}) => {
+  if (import.meta.env.DEV) console.info(`[Hamro Voice] ${event}`, details);
 };
 
 export default function VoiceAssistant({ products, sales, lang, t, onClose, onSave, onUndo, autoStart = false }) {
@@ -23,6 +28,7 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
   const [inventoryChoice, setInventoryChoice] = useState(null);
   const [savedSale, setSavedSale] = useState(null);
   const recognitionRef = useRef(null);
+  const startupTimerRef = useRef(null);
   const transcriptRef = useRef('');
   const finalTranscriptRef = useRef('');
   const recognitionStateRef = useRef('idle');
@@ -35,6 +41,11 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
   const examples = lang === 'ne'
     ? ['मैले ५ वटा साबुन ३० मा किनेँ र ४५ मा बेचेँ।', 'आजको बिक्री कति छ?', 'कुन सामानको स्टक कम छ?']
     : ['10 packet noodles 20 ma kine, 25 ma beche.', 'I bought 5 soaps for 30 and sold them for 45.', 'Aaja ko sales kati cha?'];
+
+  const clearStartupTimer = useCallback(() => {
+    if (startupTimerRef.current) window.clearTimeout(startupTimerRef.current);
+    startupTimerRef.current = null;
+  }, []);
 
   const processTranscript = useCallback((value) => {
     const spoken = value.trim();
@@ -64,17 +75,24 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
   }, [lang, products, sales, t]);
 
   const startListening = useCallback(async ({ skipPermission = false, locale = recognitionLanguage(lang), preserveTranscript = false } = {}) => {
+    if (['permission', 'starting', 'listening'].includes(recognitionStateRef.current)) {
+      voiceDebug('duplicate start ignored', { state: recognitionStateRef.current });
+      return;
+    }
     const session = recognitionSessionRef.current + 1;
     recognitionSessionRef.current = session;
     const Recognition = getSpeechRecognitionConstructor(window);
+    voiceDebug('capability check', { session, available: Boolean(Recognition), implementation: window.SpeechRecognition ? 'standard' : window.webkitSpeechRecognition ? 'webkit' : 'none' });
     if (!Recognition) {
+      recognitionStateRef.current = 'errored';
       setVoiceError('voiceUnsupported');
       setMode('error');
       return;
     }
 
     closingRef.current = false;
-    recognitionStateRef.current = 'starting';
+    clearStartupTimer();
+    recognitionStateRef.current = skipPermission ? 'starting' : 'permission';
     setVoiceError(null);
     setError('');
     setMode('starting');
@@ -87,8 +105,12 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
 
     if (!skipPermission) {
       try {
+        voiceDebug('requesting microphone permission', { session });
         await requestMicrophonePermission(window.navigator?.mediaDevices);
+        voiceDebug('microphone permission granted', { session });
       } catch (permissionError) {
+        if (session !== recognitionSessionRef.current) return;
+        voiceDebug('microphone permission failed', { session, name: permissionError?.name, message: permissionError?.message });
         setVoiceError(microphoneErrorKey(permissionError));
         recognitionStateRef.current = 'errored';
         setMode('error');
@@ -97,15 +119,26 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
     }
 
     if (closingRef.current || session !== recognitionSessionRef.current) return;
+    recognitionStateRef.current = 'starting';
     const recognition = configureRecognition(new Recognition(), locale);
+    voiceDebug('recognition configured', { session, locale, continuous: recognition.continuous, interimResults: recognition.interimResults, maxAlternatives: recognition.maxAlternatives });
     recognition.onstart = () => {
       if (session !== recognitionSessionRef.current) return;
+      clearStartupTimer();
+      voiceDebug('recognition started', { session, locale });
       recognitionStateRef.current = 'listening';
       setMode('listening');
     };
-    recognition.onaudiostart = () => { if (session === recognitionSessionRef.current) setMode('listening'); };
+    recognition.onaudiostart = () => {
+      if (session !== recognitionSessionRef.current) return;
+      clearStartupTimer();
+      voiceDebug('audio capture started', { session });
+      recognitionStateRef.current = 'listening';
+      setMode('listening');
+    };
     recognition.onresult = (event) => {
       if (session !== recognitionSessionRef.current) return;
+      voiceDebug('recognition result', { session, resultCount: event.results.length });
       let finalText = '';
       let interimText = '';
       for (let index = 0; index < event.results.length; index += 1) {
@@ -120,6 +153,8 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
     };
     recognition.onerror = (event) => {
       if (closingRef.current || session !== recognitionSessionRef.current) return;
+      clearStartupTimer();
+      voiceDebug('recognition error', { session, error: event.error, message: event.message });
       if (shouldFallbackRecognitionLanguage(event.error, lang, fallbackAttemptedRef.current)) {
         fallbackAttemptedRef.current = true;
         recognitionStateRef.current = 'fallback';
@@ -132,6 +167,8 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
     };
     recognition.onend = () => {
       if (session !== recognitionSessionRef.current) return;
+      clearStartupTimer();
+      voiceDebug('recognition ended', { session, state: recognitionStateRef.current, hasTranscript: Boolean(transcriptRef.current.trim()) });
       recognitionRef.current = null;
       if (closingRef.current) return;
       if (recognitionStateRef.current === 'fallback') {
@@ -149,31 +186,52 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
     };
     recognitionRef.current = recognition;
     try {
+      startupTimerRef.current = window.setTimeout(() => {
+        if (session !== recognitionSessionRef.current || recognitionStateRef.current !== 'starting') return;
+        voiceDebug('recognition startup timed out', { session, locale });
+        recognitionSessionRef.current += 1;
+        recognitionStateRef.current = 'errored';
+        recognitionRef.current?.abort?.();
+        recognitionRef.current = null;
+        setVoiceError('voiceRecognitionFailed');
+        setMode('error');
+        clearStartupTimer();
+      }, 10000);
+      voiceDebug('calling recognition.start', { session, locale });
       recognition.start();
     } catch (startError) {
       if (session !== recognitionSessionRef.current) return;
+      clearStartupTimer();
+      voiceDebug('recognition.start threw', { session, name: startError?.name, message: startError?.message });
       recognitionRef.current = null;
       recognitionStateRef.current = 'errored';
       setVoiceError(microphoneErrorKey(startError));
       setMode('error');
     }
-  }, [lang, processTranscript]);
+  }, [clearStartupTimer, lang, processTranscript]);
 
   useEffect(() => {
-    if (autoStart && !autoStartedRef.current) {
+    if (!autoStart || autoStartedRef.current) return undefined;
+    const autoStartTimer = window.setTimeout(() => {
+      if (autoStartedRef.current) return;
       autoStartedRef.current = true;
+      voiceDebug('auto start scheduled');
       startListening();
-    }
+    }, 0);
+    return () => window.clearTimeout(autoStartTimer);
   }, [autoStart, startListening]);
 
   useEffect(() => () => {
+    voiceDebug('component cleanup', { state: recognitionStateRef.current });
     closingRef.current = true;
     recognitionSessionRef.current += 1;
     recognitionStateRef.current = 'closing';
+    clearStartupTimer();
     recognitionRef.current?.abort?.();
-  }, []);
+  }, [clearStartupTimer]);
 
   const reset = () => {
+    clearStartupTimer();
     recognitionSessionRef.current += 1;
     recognitionRef.current?.abort?.();
     recognitionStateRef.current = 'idle';
@@ -191,6 +249,8 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
     setSavedSale(null);
   };
   const close = () => {
+    clearStartupTimer();
+    voiceDebug('modal closed', { state: recognitionStateRef.current });
     closingRef.current = true;
     recognitionSessionRef.current += 1;
     recognitionStateRef.current = 'closing';

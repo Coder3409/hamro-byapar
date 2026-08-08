@@ -68,11 +68,16 @@ assert.equal(recognitionErrorKey('not-allowed'), 'voicePermissionDenied');
 assert.equal(recognitionErrorKey('no-speech'), 'voiceNoSpeech');
 assert.equal(recognitionErrorKey('network'), 'voiceNetworkError');
 assert.equal(microphoneErrorKey({ name: 'NotAllowedError' }), 'voicePermissionDenied');
+assert.equal(microphoneErrorKey({ name: 'PermissionTimeoutError' }), 'voicePermissionTimeout');
 let microphoneStopped = false;
 await requestMicrophonePermission({ getUserMedia: async (constraints) => {
   assert.deepEqual(constraints, { audio: true });
   return { getTracks: () => [{ stop: () => { microphoneStopped = true; } }] };
 } });
 assert.equal(microphoneStopped, true);
+await assert.rejects(
+  requestMicrophonePermission({ getUserMedia: () => new Promise(() => undefined) }, 5),
+  (permissionError) => permissionError.name === 'PermissionTimeoutError',
+);
 
 console.log('Hamro Byapar smoke tests passed.');

@@ -20,6 +20,7 @@ export function shouldFallbackRecognitionLanguage(error, lang, fallbackAttempted
 
 export function microphoneErrorKey(error) {
   const name = error?.name || '';
+  if (name === 'PermissionTimeoutError') return 'voicePermissionTimeout';
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') return 'voicePermissionDenied';
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return 'voiceMicrophoneMissing';
   if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') return 'voiceMicrophoneBusy';
@@ -36,8 +37,29 @@ export function recognitionErrorKey(code) {
   return 'voiceRecognitionFailed';
 }
 
-export async function requestMicrophonePermission(mediaDevices = globalThis.navigator?.mediaDevices) {
+export async function requestMicrophonePermission(mediaDevices = globalThis.navigator?.mediaDevices, timeoutMs = 15000) {
   if (!mediaDevices?.getUserMedia) return;
-  const stream = await mediaDevices.getUserMedia({ audio: true });
-  stream.getTracks().forEach((track) => track.stop());
+  let timedOut = false;
+  let timeoutId;
+  const mediaPromise = mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+    if (timedOut) {
+      stream.getTracks().forEach((track) => track.stop());
+      return null;
+    }
+    return stream;
+  });
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = globalThis.setTimeout(() => {
+      timedOut = true;
+      const error = new Error('Microphone permission request timed out.');
+      error.name = 'PermissionTimeoutError';
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    const stream = await Promise.race([mediaPromise, timeoutPromise]);
+    stream?.getTracks().forEach((track) => track.stop());
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
 }
