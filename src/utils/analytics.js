@@ -11,7 +11,7 @@ export function summarize(sales, products) {
   const prev = previous.reduce((a, s) => a + s.total, 0);
   const units = sales.reduce((map, sale) => ({ ...map, [sale.productId]: (map[sale.productId] || 0) + sale.quantity }), {});
   const ranked = [...products].sort((a, b) => (units[b.id] || b.sold || 0) - (units[a.id] || a.sold || 0));
-  return { today, revenue: today.reduce((a, s) => a + s.total, 0), profit: today.reduce((a, s) => a + s.total - s.cost, 0), transactions: today.length, lowStock: products.filter((p) => p.stock <= p.lowStock).length, change: prev ? Math.round(((cur - prev) / prev) * 100) : 0, ranked, slow: [...ranked].reverse() };
+  return { today, revenue: today.reduce((a, s) => a + s.total, 0), profit: today.reduce((a, s) => a + s.total - s.cost, 0), transactions: today.length, unitsSold: today.reduce((a, s) => a + s.quantity, 0), lowStock: products.filter((p) => p.stock <= p.lowStock).length, change: prev ? Math.round(((cur - prev) / prev) * 100) : 0, ranked, slow: [...ranked].reverse() };
 }
 
 export function chartData(sales, metric = 'revenue', days = 7) {
