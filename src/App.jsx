@@ -3,6 +3,7 @@ import {
   AlertTriangle, ArrowRight, BarChart3, Bell, Bot, Check, ChevronRight, CircleDollarSign,
   CloudOff, CreditCard, FileText, LayoutDashboard, Lightbulb, Menu, Mic, MonitorUp, Package, Plus, Search, Settings,
   ShoppingBag, ShoppingCart, Sparkles, Store, TrendingDown, TrendingUp, Users, Wallet, X,
+  MessageSquare, Calendar, DollarSign, Zap, Shield, Eye, Clock,
 } from 'lucide-react';
 import { createDemoSales, demoProducts, demoProfile } from './data/demo';
 import { officialSlogan, translate } from './i18n/translations';
@@ -21,6 +22,13 @@ import SubscriptionPage from './components/subscription/SubscriptionPage';
 import UpgradeModal from './components/subscription/UpgradeModal';
 import ManageSubscriptionModal from './components/subscription/ManageSubscriptionModal';
 import CancelConfirmModal from './components/subscription/CancelConfirmModal';
+import AIBusinessSnapshot from './components/ai/AIBusinessSnapshot';
+import AIInsightsPanel from './components/ai/AIInsightsPanel';
+import AIWatch from './components/ai/AIWatch';
+import AIChat from './components/ai/AIChat';
+import { buildBusinessContext } from './ai/businessContext';
+import { generateInsights } from './ai/insightEngine';
+import { generateRecommendations } from './ai/recommendationEngine';
 
 const nav = [
   ['dashboard', LayoutDashboard, 'dashboard'], ['sales', ShoppingCart, 'sales'], ['inventory', Package, 'inventory'],
@@ -149,12 +157,108 @@ function InventoryPage({ products, lang, t, addProduct, editStock, searchQuery =
   return <div className="page fade-in"><section className="page-title"><div><span className="eyebrow">{t('stock')}</span><h1>{t('inventory')}</h1><p>{products.length} {t('products')} · {products.filter((p) => p.stock <= p.lowStock).length} {t('itemsNeedAttention')}</p></div><Button onClick={addProduct}><Plus/>{t('addProduct')}</Button></section><Alerts products={products} lang={lang} t={t} limit={3}/><article className="card inventory-card"><div className="inventory-tools"><div className="search"><Search size={18}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`${t('product')}...`}/></div></div><div className="inventory-table"><div className="inventory-head"><span>{t('product')}</span><span>{t('stock')}</span><span>{t('price')}</span><span>{t('sales')}</span><span>{t('status')}</span></div>{rows.map((p) => { const [key,tone] = status(p); return <div className="inventory-row" key={p.id}><div><span className="product-symbol">{(lang === 'ne' ? p.nameNe : p.name).charAt(0)}</span><span><strong>{lang === 'ne' ? p.nameNe : p.name}</strong><small>{p.category}</small></span></div><button className="stock-edit" onClick={() => editStock(p)} aria-label={`${t('updateStock')}: ${lang === 'ne' ? p.nameNe : p.name}`}><strong>{p.stock.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')}</strong> {t('units')}</button><span>{money(p.sellingPrice, lang)}</span><span>{p.sold.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')} {t('units')}</span><span className={`status ${tone}`}><i/>{t(key)}</span></div>; })}</div></article></div>;
 }
 
-function AIPage({ sales, products, lang, t, requireAi, onAiUsed }) {
-  const insight = getInsights(sales, products, lang); const [selected, setSelected] = useState(5);
-  const questions = ['qToday','qBest','qSlow','qRestock','qCompare','qWatch'];
-  const card = insight.cards[selected === 1 ? 0 : selected === 2 ? 2 : selected === 3 || selected === 5 ? 1 : 0];
-  const choose = (i) => { if (requireAi) { if (!requireAi()) return; onAiUsed?.(); } setSelected(i); };
-  return <div className="page fade-in ai-page"><section className="ai-hero"><div className="ai-orb"><Bot size={34}/><i/></div><div><span>{t('ai')}</span><h1>{t('aiSubtitle')}</h1><p>{t('localInsight')}</p></div></section><div className="ai-layout"><aside className="card question-card"><div className="card-heading"><div><span className="eyebrow">{t('quickQuestions')}</span><h2>{t('askAi')}</h2></div></div>{questions.map((q,i) => <button key={q} className={selected === i ? 'active' : ''} onClick={() => choose(i)}><span>{i === 5 ? <AlertTriangle/> : i === 3 ? <Package/> : i === 1 ? <TrendingUp/> : <Lightbulb/>}</span>{t(q)}<ChevronRight/></button>)}</aside><section className="ai-response card"><div className="ai-response-label"><Sparkles size={17}/>{t('aiSays')}</div><h2>{card.insight}</h2><div className="response-points"><div><span className="point-icon green"><Lightbulb/></span><div><small>{t('insight')}</small><p>{card.insight}</p></div></div><div><span className="point-icon blue"><BarChart3/></span><div><small>{t('why')}</small><p>{card.reason}</p></div></div><div><span className="point-icon gold"><ArrowRight/></span><div><small>{t('action')}</small><p>{card.action}</p></div></div></div><div className="offline-note"><Check/>{t('localInsight')}</div></section></div></div>;
+function AIPage({ sales, products, lang, t, requireAi, onAiUsed, subscription }) {
+  const context = buildBusinessContext({ sales, products, profile: { shopName: 'Hamro Byapar' }, lang });
+  const insights = generateInsights(context);
+  const recommendations = generateRecommendations(context);
+  const [showChat, setShowChat] = useState(false);
+
+  const openChat = () => {
+    if (requireAi && !requireAi()) return;
+    onAiUsed?.();
+    setShowChat(true);
+  };
+
+  return <div className="page fade-in ai-page">
+    <section className="ai-hero">
+      <div className="ai-orb"><Bot size={34} /><i /></div>
+      <div>
+        <span>{t('ai')}</span>
+        <h1>{t('hamroAI')}</h1>
+        <p>{t('aiCopilotDesc')}</p>
+      </div>
+      <div className="ai-status-badge">
+        <span className="status-dot ready" />
+        <span>{t('ready')}</span>
+        <span className="data-source">{t('basedOnShopData')}</span>
+      </div>
+    </section>
+
+    <AIBusinessSnapshot context={context} t={t} lang={lang} />
+
+    <AIWatch context={context} t={t} lang={lang} onNavigate={(route) => setPage(route)} />
+
+    <AIInsightsPanel insights={insights} t={t} lang={lang} onNavigate={(route) => setPage(route)} />
+
+    <section className="ai-recommendations">
+      <div className="recommendations-header">
+        <h2>{t('recommendations')}</h2>
+        <span className="recommendations-count">{recommendations.length} {t('actionsSuggested')}</span>
+      </div>
+      <div className="recommendations-grid">
+        {recommendations.slice(0, 4).map((rec, idx) => (
+          <article key={`${rec.id}-${idx}`} className={`recommendation-card ${rec.priority}`}>
+            <div className="rec-icon">
+              {rec.icon === 'package' && <Package size={20} />}
+              {rec.icon === 'megaphone' && <MessageSquare size={20} />}
+              {rec.icon === 'alert_triangle' && <AlertTriangle size={20} />}
+              {rec.icon === 'tag' && <AlertTriangle size={20} />}
+              {rec.icon === 'calendar' && <Calendar size={20} />}
+              {rec.icon === 'dollar_sign' && <DollarSign size={20} />}
+              {rec.icon === 'trending_down' && <TrendingUp size={20} />}
+              {rec.icon === 'plus' && <span className="plus-icon">+</span>}
+              {rec.icon === 'shopping_cart' && <ShoppingCart size={20} />}
+            </div>
+            <h3>{rec.title}</h3>
+            <p>{rec.explanation}</p>
+            <div className="rec-why"><strong>{t('why')}:</strong> {rec.why}</div>
+            {rec.action && (
+              <button className="rec-action" onClick={() => setPage(rec.action.route)}>
+                {rec.action.label}
+              </button>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+
+    <section className="ai-quick-questions">
+      <div className="quick-questions-header">
+        <h2>{t('quickQuestions')}</h2>
+        <p>{t('quickQuestionsDesc')}</p>
+      </div>
+      <div className="quick-questions-grid">
+        {['qToday', 'qBest', 'qSlow', 'qRestock', 'qCompare', 'qWatch'].map((q, i) => (
+          <button key={q} className="quick-question-btn" onClick={() => { if (requireAi && !requireAi()) return; onAiUsed?.(); setShowChat(true); }}>
+            <span className="qq-icon">
+              {i === 5 ? <AlertTriangle /> : i === 3 ? <Package /> : i === 1 ? <TrendingUp /> : <Lightbulb />}
+            </span>
+            <span>{t(q)}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+
+    <div className="ai-chat-trigger">
+      <button className="button primary voice-action" onClick={openChat}>
+        <MessageSquare size={19} />
+        <span>{t('startConversation')}</span>
+      </button>
+      <p className="chat-hint">{t('chatHint')}</p>
+    </div>
+
+    {showChat && (
+      <AIChat
+        sales={sales}
+        products={products}
+        profile={{ shopName: 'Hamro Byapar' }}
+        lang={lang}
+        t={t}
+        onNavigate={(route) => setPage(route)}
+        onClose={() => setShowChat(false)}
+      />
+    )}
+  </div>;
 }
 
 function SettingsPage({ profile, setProfile, presentation, setPresentation, t, loadDemo, subscription, openManage, openUpgrade, openCancel }) {
