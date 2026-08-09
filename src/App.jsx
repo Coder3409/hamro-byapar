@@ -25,7 +25,6 @@ import CancelConfirmModal from './components/subscription/CancelConfirmModal';
 import AIBusinessSnapshot from './components/ai/AIBusinessSnapshot';
 import AIInsightsPanel from './components/ai/AIInsightsPanel';
 import AIWatch from './components/ai/AIWatch';
-import AIChat from './components/ai/AIChat';
 import { buildBusinessContext } from './ai/businessContext';
 import { generateInsights } from './ai/insightEngine';
 import { generateRecommendations } from './ai/recommendationEngine';
@@ -53,6 +52,11 @@ function Toast({ message }) {
   return <div className="toast"><span><Check size={15} /></span>{message}</div>;
 }
 
+function ConnectionToast({ notice }) {
+  if (!notice) return null;
+  return <div className={`connection-toast ${notice.kind}`} role="status"><span>{notice.kind === 'offline' ? <CloudOff size={16}/> : <Check size={16}/>}</span>{notice.message}</div>;
+}
+
 function NotificationPanel({ notifications, lang, t, onReadAll }) {
   const rows = [...notifications].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 12);
   const message = (item) => t(item.alertType === 'out_of_stock' ? 'outOfStockNotification' : 'lowStockNotification')
@@ -64,8 +68,11 @@ function NotificationPanel({ notifications, lang, t, onReadAll }) {
 function Header({ lang, setLang, online, presentation, t, page, setMenuOpen, setPage, onSearch, notifications, notificationsOpen, setNotificationsOpen, markAllRead }) {
   const unread = notifications.filter((item) => !item.isRead).length;
   const searchRef = useRef(null);
+  const previousUnread = useRef(unread);
+  const [bellAttention, setBellAttention] = useState(false);
   useEffect(() => { const focusSearch = (event) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); searchRef.current?.focus(); } }; addEventListener('keydown', focusSearch); return () => removeEventListener('keydown', focusSearch); }, []);
-  return <header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(true)} aria-label={t('more')}><Menu /></button><div className="mobile-logo"><Logo compact /></div><form className="header-search" onSubmit={(event) => { event.preventDefault(); const query = new FormData(event.currentTarget).get('search')?.trim(); if (query) { onSearch(query); setPage('inventory'); } }}><Search/><input ref={searchRef} name="search" aria-label={t('globalSearch')} placeholder={t('globalSearch')}/><kbd>Ctrl K</kbd></form><div className="page-heading"><span>{t(page)}</span></div><div className="topbar-actions">{presentation && <div className="presentation-badge"><MonitorUp size={15}/><span>{t('presentationMode')}</span></div>}<div className={`connection ${online ? '' : 'offline'}`}>{online ? <span className="dot" /> : <CloudOff size={14} />}<span>{t(online ? 'online' : 'offline')}</span></div><div className="language-switch" aria-label={t('language')}><button className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>EN</button><button className={lang === 'ne' ? 'active' : ''} onClick={() => setLang('ne')}>ने</button></div><div className="notification-wrap"><button className="notification" aria-label={t('alerts')} aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(!notificationsOpen)}><Bell size={19} />{unread > 0 && <><i/><b>{unread > 9 ? '9+' : unread}</b></>}</button>{notificationsOpen && <NotificationPanel notifications={notifications} lang={lang} t={t} onReadAll={markAllRead}/>}</div><div className="avatar">AS</div></div></header>;
+  useEffect(() => { if (unread <= previousUnread.current) { previousUnread.current = unread; return undefined; } previousUnread.current = unread; setBellAttention(true); const timer = window.setTimeout(() => setBellAttention(false), 700); return () => window.clearTimeout(timer); }, [unread]);
+  return <header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(true)} aria-label={t('more')}><Menu /></button><div className="mobile-logo"><Logo compact /></div><form className="header-search" onSubmit={(event) => { event.preventDefault(); const query = new FormData(event.currentTarget).get('search')?.trim(); if (query) { onSearch(query); setPage('inventory'); } }}><Search/><input ref={searchRef} name="search" aria-label={t('globalSearch')} placeholder={t('globalSearch')}/><kbd>Ctrl K</kbd></form><div className="page-heading"><span>{t(page)}</span></div><div className="topbar-actions">{presentation && <div className="presentation-badge"><MonitorUp size={15}/><span>{t('presentationMode')}</span></div>}<div className={`connection ${online ? '' : 'offline'}`}>{online ? <span className="dot" /> : <CloudOff size={14} />}<span>{t(online ? 'online' : 'offline')}</span></div><div className="language-switch" aria-label={t('language')}><button className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>EN</button><button className={lang === 'ne' ? 'active' : ''} onClick={() => setLang('ne')}>ने</button></div><div className="notification-wrap"><button className={`notification ${bellAttention ? 'attention' : ''}`} aria-label={t('alerts')} aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(!notificationsOpen)}><Bell size={19} />{unread > 0 && <><i/><b>{unread > 9 ? '9+' : unread}</b></>}</button>{notificationsOpen && <NotificationPanel notifications={notifications} lang={lang} t={t} onReadAll={markAllRead}/>}</div><div className="avatar">AS</div></div></header>;
 }
 
 function Sidebar({ page, setPage, t, open, setOpen, profile, online }) {
@@ -73,8 +80,31 @@ function Sidebar({ page, setPage, t, open, setOpen, profile, online }) {
   return <><aside className={`sidebar ${open ? 'open' : ''}`}><div className="sidebar-brand"><Logo /></div><nav>{nav.map(([id, Icon, key]) => <button key={id} className={page === id ? 'active' : ''} onClick={() => { setPage(id); setOpen(false); }}><Icon size={19} /><span>{t(key)}</span>{page === id && <i />}</button>)}</nav><div className="sidebar-help"><span className="ai-mini-orb"><Sparkles size={18}/></span><strong>{t('aiAssistant')}</strong><p>{t('aiCompanion')}</p><button onClick={() => setPage('ai')}>{t('startConversation')} <ArrowRight size={14} /></button></div><div className={`sidebar-sync ${online ? '' : 'offline'}`}><span/><div><strong>{t(online ? 'synced' : 'offline')}</strong><small>{t(online ? 'justNow' : 'savedLocally')}</small></div></div><div className="sidebar-profile"><div className="avatar">{ownerInitials}</div><div><strong>{profile.ownerName}</strong><span>{profile.shopName}</span></div><ChevronRight size={17} /></div></aside>{open && <button className="sidebar-scrim" aria-label={t('close')} onClick={() => setOpen(false)} />}</>;
 }
 
-function MetricCard({ icon: Icon, label, value, note, tone }) {
-  return <article className={`metric-card ${tone}`}><div className="metric-icon"><Icon size={21} /></div><div><p>{label}</p><strong>{value}</strong><span>{note}</span></div></article>;
+function useCountUp(value, duration = 760) {
+  const [display, setDisplay] = useState(value);
+  const previous = useRef(0);
+  useEffect(() => {
+    const startValue = previous.current;
+    const target = Number(value) || 0;
+    previous.current = target;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setDisplay(target); return undefined; }
+    let frame;
+    const start = performance.now();
+    const tick = (now) => {
+      const progress = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplay(startValue + (target - startValue) * eased);
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [value, duration]);
+  return display;
+}
+
+function MetricCard({ icon: Icon, label, value, formatValue, note, tone }) {
+  const animated = useCountUp(value);
+  return <article className={`metric-card ${tone}`}><div className="metric-icon"><Icon size={21} /></div><div><p>{label}</p><strong>{formatValue(Math.round(animated))}</strong><span>{note}</span></div></article>;
 }
 
 function SalesChart({ sales, lang, t, compact = false }) {
@@ -90,13 +120,14 @@ function SalesChart({ sales, lang, t, compact = false }) {
   const axisText = (date) => lang === 'ne'
     ? (days <= 7 ? nepaliDays[date.getDay()] : date.getDate().toLocaleString('ne-NP'))
     : date.toLocaleDateString('en-US', { weekday: days <= 7 ? 'short' : undefined, day: days > 7 ? 'numeric' : undefined });
-  return <article className={`card chart-card ${compact ? 'compact' : ''}`}><div className="card-heading"><div><span className="eyebrow">{t('analytics')}</span><h2>{t('salesTrend')}</h2></div><div className="chart-controls"><div className="segmented">{['revenue', 'orders', 'profit'].map((item) => <button key={item} className={metric === item ? 'active' : ''} onClick={() => setMetric(item)}>{t(item)}</button>)}</div><div className="segmented soft">{[[1, 'today'], [7, 'sevenDays'], [30, 'thirtyDays']].map(([value, key]) => <button key={value} className={days === value ? 'active' : ''} onClick={() => setDays(value)}>{t(key)}</button>)}</div></div></div><div className="chart-wrap"><svg viewBox="0 0 700 220" role="img" aria-label={t('salesTrend')} preserveAspectRatio="none"><defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#d71920" stopOpacity=".24"/><stop offset="1" stopColor="#d71920" stopOpacity="0"/></linearGradient></defs>{[42, 89, 136, 184].map((y) => <line key={y} x1="22" x2="678" y1={y} y2={y} className="gridline" />)}<path d={`${path} L${points.at(-1)?.x || 678},190 L22,190 Z`} fill="url(#area)"/><path d={path} className="trend-line"/>{points.map((p, i) => <g key={i}><circle cx={p.x} cy={p.y} r={hovered === i ? 7 : 4} className="trend-dot" onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)} /><rect x={p.x - 15} y="22" width="30" height="170" fill="transparent" onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)} />{hovered === i && <g><rect x={Math.min(Math.max(p.x - 52, 4), 592)} y={Math.max(p.y - 46, 2)} width="104" height="34" rx="8" className="tooltip-bg"/><text x={Math.min(Math.max(p.x, 56), 644)} y={Math.max(p.y - 24, 24)} textAnchor="middle" className="tooltip-text">{metric === 'orders' ? p.value : money(p.value, lang)}</text></g>}</g>)}{points.filter((_, i) => days <= 7 || i % 5 === 0 || i === points.length - 1).map((p, i) => <text key={i} x={p.x} y="211" textAnchor="middle" className="axis-label">{axisText(p.date)}</text>)}</svg></div>{!compact && <div className="chart-insight"><div className="insight-icon"><Sparkles size={20} /></div><div><strong>{t('whatHappened')}</strong><p>{insights.overview}</p></div></div>}</article>;
+  const chartKey = `${metric}-${days}`;
+  return <article className={`card chart-card ${compact ? 'compact' : ''}`}><div className="card-heading"><div><span className="eyebrow">{t('analytics')}</span><h2>{t('salesTrend')}</h2></div><div className="chart-controls"><div className="segmented">{['revenue', 'orders', 'profit'].map((item) => <button key={item} className={metric === item ? 'active' : ''} onClick={() => setMetric(item)}>{t(item)}</button>)}</div><div className="segmented soft">{[[1, 'today'], [7, 'sevenDays'], [30, 'thirtyDays']].map(([value, key]) => <button key={value} className={days === value ? 'active' : ''} onClick={() => setDays(value)}>{t(key)}</button>)}</div></div></div><div className="chart-wrap"><svg viewBox="0 0 700 220" role="img" aria-label={t('salesTrend')} preserveAspectRatio="none"><defs><linearGradient id={`area-${chartKey}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#d71920" stopOpacity=".24"/><stop offset="1" stopColor="#d71920" stopOpacity="0"/></linearGradient></defs>{[42, 89, 136, 184].map((y) => <line key={y} x1="22" x2="678" y1={y} y2={y} className="gridline" />)}<path key={`area-${chartKey}`} d={`${path} L${points.at(-1)?.x || 678},190 L22,190 Z`} fill={`url(#area-${chartKey})`} className="trend-area"/><path key={`line-${chartKey}`} d={path} className="trend-line" pathLength="1"/>{points.map((p, i) => <g key={`${chartKey}-${i}`}><circle cx={p.x} cy={p.y} r={hovered === i ? 7 : 4} className="trend-dot" style={{ '--dot-delay': `${Math.min(i * 70, 700)}ms` }} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)} /><rect x={p.x - 15} y="22" width="30" height="170" fill="transparent" onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)} />{hovered === i && <g><rect x={Math.min(Math.max(p.x - 52, 4), 592)} y={Math.max(p.y - 46, 2)} width="104" height="34" rx="8" className="tooltip-bg"/><text x={Math.min(Math.max(p.x, 56), 644)} y={Math.max(p.y - 24, 24)} textAnchor="middle" className="tooltip-text">{metric === 'orders' ? p.value : money(p.value, lang)}</text></g>}</g>)}{points.filter((_, i) => days <= 7 || i % 5 === 0 || i === points.length - 1).map((p, i) => <text key={i} x={p.x} y="211" textAnchor="middle" className="axis-label">{axisText(p.date)}</text>)}</svg></div>{!compact && <div className="chart-insight"><div className="insight-icon"><Sparkles size={20} /></div><div><strong>{t('whatHappened')}</strong><p>{insights.overview}</p></div></div>}</article>;
 }
 
 function ProductRanking({ products, t, lang, slow = false }) {
   const list = slow ? [...products].sort((a, b) => a.sold - b.sold).slice(0, 4) : [...products].sort((a, b) => b.sold - a.sold).slice(0, 5);
   const max = Math.max(...list.map((p) => p.sold), 1);
-  return <article className="card ranking-card"><div className="card-heading"><div><span className="eyebrow">{slow ? t('slowMovers') : t('topProductsHelp')}</span><h2>{slow ? t('slowMovers') : t('bestSellers')}</h2></div>{slow ? <TrendingDown className="muted-icon" /> : <TrendingUp className="green-icon" />}</div><div className="rank-list">{list.map((p, i) => <div className="rank-row" key={p.id}><span className="rank-number">{i + 1}</span><div><strong>{lang === 'ne' ? p.nameNe : p.name}</strong><div className="progress"><i style={{ width: `${Math.max(10, p.sold / max * 100)}%` }} /></div></div><span>{p.sold.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')} {t('unitsSold')}</span></div>)}</div></article>;
+  return <article className="card ranking-card"><div className="card-heading"><div><span className="eyebrow">{slow ? t('slowMovers') : t('topProductsHelp')}</span><h2>{slow ? t('slowMovers') : t('bestSellers')}</h2></div>{slow ? <TrendingDown className="muted-icon" /> : <TrendingUp className="green-icon" />}</div><div className="rank-list">{list.map((p, i) => <div className="rank-row" key={p.id} style={{ '--rank-index': i }}><span className="rank-number">{i + 1}</span><div><strong>{lang === 'ne' ? p.nameNe : p.name}</strong><div className="progress"><i style={{ width: `${Math.max(10, p.sold / max * 100)}%` }} /></div></div><span>{p.sold.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')} {t('unitsSold')}</span></div>)}</div></article>;
 }
 
 function SaleRows({ sales, lang, t, limit }) {
@@ -112,7 +143,8 @@ function AIInsightBanner({ sales, products, lang, t, openAi }) {
 
 function Dashboard({ sales, products, profile, lang, t, setPage, openSale, openVoice }) {
   const d = summarize(sales, products);
-  return <div className="page fade-in"><section className="welcome"><div><span>{t('greeting')} <span aria-hidden>👋</span></span><h1>{profile.shopName}</h1><p>{t('overview')}</p></div><div className="page-actions"><Button className="voice-action" onClick={openVoice}><Mic size={19}/><span><small>{t('hamroVoice')}</small>{t('voiceSale')}</span></Button><Button variant="navy" onClick={openSale}><Plus size={19}/>{t('addSale')}</Button></div></section><section className="metrics"><MetricCard icon={Wallet} label={t('todaySales')} value={money(d.revenue, lang)} note={`${d.change >= 0 ? '↑ ' : '↓ '}${Math.abs(d.change)}% ${t('sevenDays')}`} tone="green"/><MetricCard icon={ShoppingBag} label={t('transactions')} value={d.transactions.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')} note={`${d.unitsSold.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')} ${t('unitsSoldToday')}`} tone="blue"/><MetricCard icon={CircleDollarSign} label={t('estimatedProfit')} value={money(d.profit, lang)} note={`${d.revenue ? Math.round(d.profit / d.revenue * 100) : 0}% ${t('profit')}`} tone="gold"/><MetricCard icon={AlertTriangle} label={t('lowStock')} value={d.lowStock.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')} note={t('itemsNeedAttention')} tone="red"/></section><div className="dashboard-grid"><SalesChart sales={sales} lang={lang} t={t}/><aside className="right-column"><ProductRanking products={products} t={t} lang={lang}/></aside></div><AIInsightBanner sales={sales} products={products} lang={lang} t={t} openAi={() => setPage('ai')}/><div className="two-column"><article className="card recent-card"><div className="card-heading"><div><span className="eyebrow">{t('today')}</span><h2>{t('recentSales')}</h2></div><button className="text-button" onClick={() => setPage('sales')}>{t('seeAll')} <ArrowRight size={15}/></button></div><SaleRows sales={sales.filter((s) => dateKey(s.createdAt) === dateKey(new Date()))} lang={lang} t={t} limit={4}/></article><Alerts products={products} lang={lang} t={t} limit={3}/></div></div>;
+  const locale = lang === 'ne' ? 'ne-NP' : 'en-IN';
+  return <div className="page fade-in dashboard-page"><section className="welcome"><div><span>{t('greeting')} <span aria-hidden>👋</span></span><h1>{profile.shopName}</h1><p>{t('overview')}</p></div><div className="page-actions"><Button className="voice-action" onClick={openVoice}><Mic size={19}/><span><small>{t('hamroVoice')}</small>{t('voiceSale')}</span></Button><Button variant="navy" onClick={openSale}><Plus size={19}/>{t('addSale')}</Button></div></section><section className="metrics"><MetricCard icon={Wallet} label={t('todaySales')} value={d.revenue} formatValue={(value) => money(value, lang)} note={`${d.change >= 0 ? '↑ ' : '↓ '}${Math.abs(d.change)}% ${t('sevenDays')}`} tone="green"/><MetricCard icon={ShoppingBag} label={t('transactions')} value={d.transactions} formatValue={(value) => value.toLocaleString(locale)} note={`${d.unitsSold.toLocaleString(locale)} ${t('unitsSoldToday')}`} tone="blue"/><MetricCard icon={CircleDollarSign} label={t('estimatedProfit')} value={d.profit} formatValue={(value) => money(value, lang)} note={`${d.revenue ? Math.round(d.profit / d.revenue * 100) : 0}% ${t('profit')}`} tone="gold"/><MetricCard icon={AlertTriangle} label={t('lowStock')} value={d.lowStock} formatValue={(value) => value.toLocaleString(locale)} note={t('itemsNeedAttention')} tone="red"/></section><div className="dashboard-grid"><SalesChart sales={sales} lang={lang} t={t}/><aside className="right-column"><ProductRanking products={products} t={t} lang={lang}/></aside></div><AIInsightBanner sales={sales} products={products} lang={lang} t={t} openAi={() => setPage('ai')}/><div className="two-column"><article className="card recent-card"><div className="card-heading"><div><span className="eyebrow">{t('today')}</span><h2>{t('recentSales')}</h2></div><button className="text-button" onClick={() => setPage('sales')}>{t('seeAll')} <ArrowRight size={15}/></button></div><SaleRows sales={sales.filter((s) => dateKey(s.createdAt) === dateKey(new Date()))} lang={lang} t={t} limit={4}/></article><Alerts products={products} lang={lang} t={t} limit={3}/></div></div>;
 }
 
 function Alerts({ products, lang, t, limit }) {
@@ -157,17 +189,11 @@ function InventoryPage({ products, lang, t, addProduct, editStock, searchQuery =
   return <div className="page fade-in"><section className="page-title"><div><span className="eyebrow">{t('stock')}</span><h1>{t('inventory')}</h1><p>{products.length} {t('products')} · {products.filter((p) => p.stock <= p.lowStock).length} {t('itemsNeedAttention')}</p></div><Button onClick={addProduct}><Plus/>{t('addProduct')}</Button></section><Alerts products={products} lang={lang} t={t} limit={3}/><article className="card inventory-card"><div className="inventory-tools"><div className="search"><Search size={18}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`${t('product')}...`}/></div></div><div className="inventory-table"><div className="inventory-head"><span>{t('product')}</span><span>{t('stock')}</span><span>{t('price')}</span><span>{t('sales')}</span><span>{t('status')}</span></div>{rows.map((p) => { const [key,tone] = status(p); return <div className="inventory-row" key={p.id}><div><span className="product-symbol">{(lang === 'ne' ? p.nameNe : p.name).charAt(0)}</span><span><strong>{lang === 'ne' ? p.nameNe : p.name}</strong><small>{p.category}</small></span></div><button className="stock-edit" onClick={() => editStock(p)} aria-label={`${t('updateStock')}: ${lang === 'ne' ? p.nameNe : p.name}`}><strong>{p.stock.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')}</strong> {t('units')}</button><span>{money(p.sellingPrice, lang)}</span><span>{p.sold.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')} {t('units')}</span><span className={`status ${tone}`}><i/>{t(key)}</span></div>; })}</div></article></div>;
 }
 
-function AIPage({ sales, products, lang, t, requireAi, onAiUsed, subscription }) {
+function AIPage({ sales, products, lang, t }) {
   const context = buildBusinessContext({ sales, products, profile: { shopName: 'Hamro Byapar' }, lang });
   const insights = generateInsights(context);
   const recommendations = generateRecommendations(context);
-  const [showChat, setShowChat] = useState(false);
-
-  const openChat = () => {
-    if (requireAi && !requireAi()) return;
-    onAiUsed?.();
-    setShowChat(true);
-  };
+  const focusAiSection = (selector) => document.querySelector(selector)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   return <div className="page fade-in ai-page">
     <section className="ai-hero">
@@ -229,7 +255,7 @@ function AIPage({ sales, products, lang, t, requireAi, onAiUsed, subscription })
       </div>
       <div className="quick-questions-grid">
         {['qToday', 'qBest', 'qSlow', 'qRestock', 'qCompare', 'qWatch'].map((q, i) => (
-          <button key={q} className="quick-question-btn" onClick={() => { if (requireAi && !requireAi()) return; onAiUsed?.(); setShowChat(true); }}>
+          <button key={q} className="quick-question-btn" onClick={() => focusAiSection(['qSlow', 'qRestock', 'qWatch'].includes(q) ? '.ai-watch' : '.ai-insights-panel')}>
             <span className="qq-icon">
               {i === 5 ? <AlertTriangle /> : i === 3 ? <Package /> : i === 1 ? <TrendingUp /> : <Lightbulb />}
             </span>
@@ -239,25 +265,6 @@ function AIPage({ sales, products, lang, t, requireAi, onAiUsed, subscription })
       </div>
     </section>
 
-    <div className="ai-chat-trigger">
-      <button className="button primary voice-action" onClick={openChat}>
-        <MessageSquare size={19} />
-        <span>{t('startConversation')}</span>
-      </button>
-      <p className="chat-hint">{t('chatHint')}</p>
-    </div>
-
-    {showChat && (
-      <AIChat
-        sales={sales}
-        products={products}
-        profile={{ shopName: 'Hamro Byapar' }}
-        lang={lang}
-        t={t}
-        onNavigate={(route) => setPage(route)}
-        onClose={() => setShowChat(false)}
-      />
-    )}
   </div>;
 }
 
@@ -285,8 +292,8 @@ function App() {
   const [products, setProducts] = useState([]); const [sales, setSales] = useState([]); const [profile, setProfileState] = useState(demoProfile); const [online, setOnline] = useState(navigator.onLine);
   const [notifications, setNotifications] = useState([]); const [alertStates, setAlertStates] = useState({}); const alertStatesRef = useRef({}); const [globalSearch, setGlobalSearch] = useState('');
   const [subscription, setSubscription] = useState(null); const [aiUsage, setAiUsage] = useState(null);
-  const [menuOpen, setMenuOpen] = useState(false); const [modal, setModal] = useState(null); const [notificationsOpen, setNotificationsOpen] = useState(false); const [toast, setToast] = useState(''); const t = (key) => translate(lang, key);
-  useEffect(() => { loadData().then((data) => { const initial = data || { products: demoProducts, sales: createDemoSales(), profile: demoProfile }; const initialAlertStates = initial.alertStates || createStockAlertBaseline(initial.products); const initialSubscription = normalizeSubscription(initial.subscription, refreshStatus(initial.subscription ? initial.subscription : legacySubscription())); alertStatesRef.current = initialAlertStates; setProducts(initial.products); setSales(initial.sales); setProfileState(initial.profile); setNotifications(initial.notifications || []); setAlertStates(initialAlertStates); setSubscription(refreshStatus(initialSubscription)); setAiUsage(monthRollover(initial.aiUsage || newUsage())); setReady(true); }); }, []);
+  const [menuOpen, setMenuOpen] = useState(false); const [modal, setModal] = useState(null); const [notificationsOpen, setNotificationsOpen] = useState(false); const [toast, setToast] = useState(''); const [connectionNotice, setConnectionNotice] = useState(null); const connectionRef = useRef(navigator.onLine); const t = (key) => translate(lang, key);
+  useEffect(() => { loadData().then((data) => { const initial = data || { products: demoProducts, sales: createDemoSales(), profile: demoProfile }; const initialAlertStates = initial.alertStates || createStockAlertBaseline(initial.products); const initialSubscription = normalizeSubscription(initial.subscription || legacySubscription()); alertStatesRef.current = initialAlertStates; setProducts(initial.products); setSales(initial.sales); setProfileState(initial.profile); setNotifications(initial.notifications || []); setAlertStates(initialAlertStates); setSubscription(refreshStatus(initialSubscription)); setAiUsage(monthRollover(initial.aiUsage || newUsage())); setReady(true); }); }, []);
   useEffect(() => { if (ready) saveData({ products, sales, profile, notifications, alertStates, subscription, aiUsage }); }, [products, sales, profile, notifications, alertStates, ready, subscription, aiUsage]);
   useEffect(() => {
     if (!ready) return;
@@ -314,6 +321,19 @@ function App() {
   useEffect(() => { document.documentElement.lang = lang; document.documentElement.dataset.lang = lang; localStorage.setItem('hamro-language', lang); }, [lang]);
   useEffect(() => { localStorage.setItem('hamro-presentation', String(presentation)); }, [presentation]);
   useEffect(() => { const update = () => setOnline(navigator.onLine); addEventListener('online', update); addEventListener('offline', update); return () => { removeEventListener('online', update); removeEventListener('offline', update); }; }, []);
+  useEffect(() => {
+    if (connectionRef.current === online) return undefined;
+    connectionRef.current = online;
+    if (!online) {
+      setConnectionNotice({ kind: 'offline', message: t('offlineSaved') });
+      const timer = window.setTimeout(() => setConnectionNotice(null), 3600);
+      return () => window.clearTimeout(timer);
+    }
+    setConnectionNotice({ kind: 'syncing', message: t('backOnlineSyncing') });
+    const syncedTimer = window.setTimeout(() => setConnectionNotice({ kind: 'synced', message: t('syncComplete') }), 900);
+    const clearTimer = window.setTimeout(() => setConnectionNotice(null), 3300);
+    return () => { window.clearTimeout(syncedTimer); window.clearTimeout(clearTimer); };
+  }, [online, lang]);
   const notify = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3200); };
   const setLang = (next) => { setLangState(next); notify(translate(next, 'languageChanged')); };
   const setPresentation = (next) => { setPresentationState(next); notify(t(next ? 'presentationEnabled' : 'presentationDisabled')); };
@@ -368,9 +388,9 @@ function App() {
   const onAiUsed = () => setAiUsage((prev) => recordAiUsage(prev));
   const pageProps = { sales, products, profile, lang, t, setPage, subscription, aiUsage, canAccess, upgradeModal: (cap) => setModal({ type: 'upgrade', capability: cap }) };
   const analyticsPage = <div className="page fade-in"><section className="page-title"><div><span className="eyebrow">{t('analytics')}</span><h1>{t('salesTrend')}</h1><p>{officialSlogan}</p></div></section><SalesChart sales={sales} lang={lang} t={t}/><div className="two-column"><ProductRanking products={products} t={t} lang={lang}/><ProductRanking products={products} t={t} lang={lang} slow/></div></div>;
-  const content = page === 'dashboard' ? <Dashboard {...pageProps} openVoice={() => setModal({ type: 'voice' })} openSale={() => setModal({ type: 'sale' })}/> : page === 'sales' ? <SalesPage {...pageProps} openVoice={() => setModal({ type: 'voice' })} openSale={() => setModal({ type: 'sale' })} quickSell={(product) => setModal({ type: 'sale', product })}/> : page === 'inventory' ? <InventoryPage {...pageProps} searchQuery={globalSearch} addProduct={() => setModal({ type: 'product' })} editStock={(product) => setModal({ type: 'stock', product })}/> : page === 'analytics' ? analyticsPage : page === 'ai' ? <AIPage {...pageProps} requireAi={requireAi} onAiUsed={onAiUsed}/> : page === 'customers' ? <CustomersPage t={t} openUpgrade={() => setModal({ type: 'upgrade', capability: 'multiStaff' })}/> : page === 'reports' ? <ReportsPage {...pageProps} openUpgrade={() => setModal({ type: 'upgrade', capability: 'exportReports' })}/> : page === 'subscription' ? <SubscriptionPage {...pageProps} billingHistory={(subscription?.billingHistory) || []} onPlanSelect={upgradeTo}/> : <SettingsPage {...pageProps} presentation={presentation} setPresentation={setPresentation} setProfile={updateProfile} loadDemo={loadDemo} subscription={subscription} openManage={() => setModal({ type: 'manage' })} openUpgrade={() => setModal({ type: 'upgrade', capability: 'advancedAnalytics' })} openCancel={() => setModal({ type: 'cancel' })}/>;
+  const content = page === 'dashboard' ? <Dashboard {...pageProps} openVoice={() => setModal({ type: 'voice' })} openSale={() => setModal({ type: 'sale' })}/> : page === 'sales' ? <SalesPage {...pageProps} openVoice={() => setModal({ type: 'voice' })} openSale={() => setModal({ type: 'sale' })} quickSell={(product) => setModal({ type: 'sale', product })}/> : page === 'inventory' ? <InventoryPage {...pageProps} searchQuery={globalSearch} addProduct={() => setModal({ type: 'product' })} editStock={(product) => setModal({ type: 'stock', product })}/> : page === 'analytics' ? analyticsPage : page === 'ai' ? <AIPage {...pageProps}/> : page === 'customers' ? <CustomersPage t={t} openUpgrade={() => setModal({ type: 'upgrade', capability: 'multiStaff' })}/> : page === 'reports' ? <ReportsPage {...pageProps} openUpgrade={() => setModal({ type: 'upgrade', capability: 'exportReports' })}/> : page === 'subscription' ? <SubscriptionPage {...pageProps} billingHistory={(subscription?.billingHistory) || []} onPlanSelect={upgradeTo}/> : <SettingsPage {...pageProps} presentation={presentation} setPresentation={setPresentation} setProfile={updateProfile} loadDemo={loadDemo} subscription={subscription} openManage={() => setModal({ type: 'manage' })} openUpgrade={() => setModal({ type: 'upgrade', capability: 'advancedAnalytics' })} openCancel={() => setModal({ type: 'cancel' })}/>;
   if (!ready) return <div className="loading-screen"><Logo/><div className="loading-bar"><i/></div><span>{officialSlogan}</span></div>;
-  return <div className={`app-shell ${presentation ? 'presentation' : ''}`}><Sidebar page={page} setPage={setPage} t={t} open={menuOpen} setOpen={setMenuOpen} profile={profile} online={online}/><main><Header lang={lang} setLang={setLang} online={online} presentation={presentation} t={t} page={page} setMenuOpen={setMenuOpen} setPage={setPage} onSearch={setGlobalSearch} notifications={notifications} notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} markAllRead={markAllRead}/>{content}<footer>{officialSlogan}</footer></main><nav className="mobile-nav">{[['dashboard',LayoutDashboard,'home'],['sales',ShoppingCart,'sales'],['inventory',Package,'inventory'],['ai',Bot,'ai'],['settings',Settings,'more']].map(([id,Icon,key]) => <button key={id} className={page === id ? 'active' : ''} onClick={() => setPage(id)}><Icon/><span>{t(key)}</span></button>)}</nav>{modal?.type === 'sale' && <SaleModal products={products} lang={lang} t={t} preset={modal.product} onClose={() => setModal(null)} onSave={saveSale}/>} {modal?.type === 'product' && <ProductModal t={t} onClose={() => setModal(null)} onSave={saveProduct}/>} {modal?.type === 'stock' && <StockModal product={modal.product} lang={lang} t={t} onClose={() => setModal(null)} onSave={updateProductStock}/>} {modal?.type === 'voice' && <VoiceAssistant products={products} sales={sales} lang={lang} t={t} aiUsageInfo={usageSummary(aiUsage, plan.plan)} onAiUse={onAiUsed} requireAi={requireAi} autoStart onClose={() => setModal(null)} onSave={saveVoiceSale} onUndo={undoVoiceSale}/>} {modal?.type === 'upgrade' && <UpgradeModal capability={modal.capability || 'advancedAnalytics'} reason={modal.reason} subscription={subscription} t={t} lang={lang} onUpgrade={(planId) => { setModal(null); upgradeTo(planId); }} onClose={() => setModal(null)}/>} {modal?.type === 'manage' && subscription && <ManageSubscriptionModal subscription={subscription} t={t} lang={lang} onUpgrade={(planId) => { setModal(null); upgradeTo(planId); }} onCancel={() => setModal({ type: 'cancel' })} onClose={() => setModal(null)}/>} {modal?.type === 'cancel' && subscription && <CancelConfirmModal subscription={subscription} t={t} onConfirm={() => downgradeToFree()} onClose={() => setModal(null)}/>}<Toast message={toast}/></div>;
+  return <div className={`app-shell ${presentation ? 'presentation' : ''}`}><Sidebar page={page} setPage={setPage} t={t} open={menuOpen} setOpen={setMenuOpen} profile={profile} online={online}/><main><Header lang={lang} setLang={setLang} online={online} presentation={presentation} t={t} page={page} setMenuOpen={setMenuOpen} setPage={setPage} onSearch={setGlobalSearch} notifications={notifications} notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} markAllRead={markAllRead}/><div className="page-route" key={page}>{content}</div><footer>{officialSlogan}</footer></main><nav className="mobile-nav">{[['dashboard',LayoutDashboard,'home'],['sales',ShoppingCart,'sales'],['inventory',Package,'inventory'],['ai',Bot,'ai'],['settings',Settings,'more']].map(([id,Icon,key]) => <button key={id} className={page === id ? 'active' : ''} onClick={() => setPage(id)}><Icon/><span>{t(key)}</span></button>)}</nav>{modal?.type === 'sale' && <SaleModal products={products} lang={lang} t={t} preset={modal.product} onClose={() => setModal(null)} onSave={saveSale}/>} {modal?.type === 'product' && <ProductModal t={t} onClose={() => setModal(null)} onSave={saveProduct}/>} {modal?.type === 'stock' && <StockModal product={modal.product} lang={lang} t={t} onClose={() => setModal(null)} onSave={updateProductStock}/>} {modal?.type === 'voice' && <VoiceAssistant products={products} sales={sales} lang={lang} t={t} aiUsageInfo={usageSummary(aiUsage, plan.plan)} onAiUse={onAiUsed} requireAi={requireAi} autoStart onClose={() => setModal(null)} onSave={saveVoiceSale} onUndo={undoVoiceSale}/>} {modal?.type === 'upgrade' && <UpgradeModal capability={modal.capability || 'advancedAnalytics'} reason={modal.reason} subscription={subscription} t={t} lang={lang} onUpgrade={(planId) => { setModal(null); upgradeTo(planId); }} onClose={() => setModal(null)}/>} {modal?.type === 'manage' && subscription && <ManageSubscriptionModal subscription={subscription} t={t} lang={lang} onUpgrade={(planId) => { setModal(null); upgradeTo(planId); }} onCancel={() => setModal({ type: 'cancel' })} onClose={() => setModal(null)}/>} {modal?.type === 'cancel' && subscription && <CancelConfirmModal subscription={subscription} t={t} onConfirm={() => downgradeToFree()} onClose={() => setModal(null)}/>}<Toast message={toast}/><ConnectionToast notice={connectionNotice}/></div>;
 }
 
 export default App;

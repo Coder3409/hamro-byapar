@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite --host 0.0.0.0 --configLoader native",
     "dev:server": "node --watch server/index.js",
-    "build": "vite build",
+    "build": "vite build --configLoader native",
     "test": "node scripts/smoke-test.mjs",
     "email:test": "node scripts/send-test-email.mjs",
     "server": "node server/index.js",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0 --configLoader native"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",

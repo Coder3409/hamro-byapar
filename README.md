@@ -25,16 +25,18 @@ npm install
 Copy-Item .env.example .env
 ```
 
-Start the email backend in one terminal:
+Start the complete app (web frontend and local API) in one terminal:
 
 ```powershell
-npm run dev:server
+npm.cmd run dev
 ```
 
-Start the Vite app in another terminal:
+On Windows, use `npm.cmd` in PowerShell so the command works even when PowerShell script execution is disabled. In VS Code, you can also press `F5` and select **Run Hamro Byapar**; the browser opens when Vite is ready.
+
+To run only the Vite frontend:
 
 ```powershell
-npm run dev
+npm.cmd run dev:web
 ```
 
 Vite proxies `/api` requests to `http://127.0.0.1:4175`. The business app still records sales and updates inventory if the backend or internet is unavailable; the notification records the email attempt as failed.
