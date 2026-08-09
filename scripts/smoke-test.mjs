@@ -164,4 +164,103 @@ await assert.rejects(
   /SMTP unavailable/,
 );
 
+// --- Subscription system assertions ---
+const { SUBSCRIPTION_PLANS, planById, PLAN_RANK, planMeets, CAPABILITY_MIN_PLAN, PAYMENT_MODE, CYCLE_DAYS } = await import('../src/subscription/plans.js');
+const { canAccess, planCanAccess, missingPlanFor } = await import('../src/subscription/access.js');
+const { createSubscription, legacySubscription, normalizeSubscription, refreshStatus, NEXT_PERIOD_MS, completeRenewal } = await import('../src/subscription/store.js');
+const { newUsage, monthRollover, recordAiUsage, remainingAi, canUseAi, usageSummary } = await import('../src/subscription/usage.js');
+const { nextInvoiceId, generateInvoice, billingHistorySeed } = await import('../src/subscription/invoices.js');
+const { requirePlan } = await import('../server/authorization.js');
+
+// Plans config
+assert.equal(SUBSCRIPTION_PLANS.length, 3);
+assert.equal(planById('FREE').price, 0);
+assert.equal(planById('PRO').price, 499);
+assert.equal(planById('BUSINESS').price, 999);
+assert.equal(planById('FREE').aiQuota, 10);
+assert.equal(planById('PRO').aiQuota, 100);
+assert.equal(planById('BUSINESS').aiQuota, 500);
+assert.equal(planMeets('PRO', 'FREE'), true);
+assert.equal(planMeets('FREE', 'PRO'), false);
+assert.equal(planMeets('BUSINESS', 'PRO'), true);
+assert.equal(CAPABILITY_MIN_PLAN.dashboard, 'FREE');
+assert.equal(CAPABILITY_MIN_PLAN.emailAlerts, 'PRO');
+assert.equal(CAPABILITY_MIN_PLAN.multiStaff, 'BUSINESS');
+
+// Access system
+assert.equal(canAccess('dashboard', { plan: 'FREE', status: 'active' }), true);
+assert.equal(canAccess('emailAlerts', { plan: 'FREE', status: 'active' }), false);
+assert.equal(canAccess('emailAlerts', { plan: 'PRO', status: 'active' }), true);
+assert.equal(canAccess('multiStaff', { plan: 'PRO', status: 'active' }), false);
+assert.equal(canAccess('multiStaff', { plan: 'BUSINESS', status: 'active' }), true);
+assert.equal(canAccess('unknownCap', { plan: 'FREE' }), true); // unknown capabilities open
+// aiInsights is FREE capability — always accessible even if cancelled/expired
+assert.equal(canAccess('aiInsights', { plan: 'PRO', status: 'cancelled' }), true);
+assert.equal(canAccess('aiInsights', { plan: 'PRO', status: 'expired' }), true);
+assert.equal(canAccess('aiInsights', { plan: 'PRO', status: 'trial' }), true);
+assert.ok(missingPlanFor('emailAlerts', { plan: 'FREE', status: 'active' }));
+assert.equal(missingPlanFor('emailAlerts', { plan: 'FREE', status: 'active' }).id, 'PRO');
+assert.ok(!missingPlanFor('dashboard', { plan: 'FREE' }));
+
+// Store (legacy default)
+const legacy = legacySubscription();
+assert.equal(legacy.plan, 'FREE');
+assert.equal(legacy.status, 'active');
+assert.ok(legacy.subscriptionId.startsWith('local-FREE'));
+const normalized = normalizeSubscription(null);
+assert.equal(normalized.plan, 'FREE');
+assert.ok(normalized.status === 'active');
+const partial = normalizeSubscription({ plan: 'PRO', status: 'active' });
+assert.equal(partial.plan, 'PRO');
+assert.ok(partial.billingHistory && Array.isArray(partial.billingHistory));
+const expiredSub = refreshStatus({ ...legacy, status: 'cancelled', renewalDate: new Date(Date.now() - 86400000).toISOString() });
+assert.equal(expiredSub.status, 'expired');
+
+// AI usage
+let usage = newUsage();
+assert.equal(usage.aiCount, 0);
+assert.equal(remainingAi(usage, 'FREE'), 10);
+assert.equal(canUseAi(usage, 'FREE'), true);
+usage = recordAiUsage(usage);
+assert.equal(usage.current.aiCount, 1);
+assert.equal(remainingAi(usage, 'FREE'), 9);
+usage = recordAiUsage(usage);
+usage = recordAiUsage(usage);
+usage = recordAiUsage(usage);
+usage = recordAiUsage(usage);
+usage = recordAiUsage(usage);
+usage = recordAiUsage(usage);
+usage = recordAiUsage(usage);
+usage = recordAiUsage(usage);
+usage = recordAiUsage(usage);
+usage = recordAiUsage(usage); // 10 total
+assert.equal(remainingAi(usage, 'FREE'), 0);
+assert.equal(canUseAi(usage, 'FREE'), false);
+assert.ok(usageSummary(usage, 'FREE').reached);
+usage = monthRollover(usage, new Date('2026-09-01')); // new month
+assert.equal(usage.current.aiCount, 0);
+assert.equal(canUseAi(usage, 'FREE'), true);
+
+// Invoices
+const invoice = generateInvoice({ subscription: { subscriptionId: 'sub-123' }, plan: { id: 'PRO', price: 499, currency: 'NPR' } }, []);
+assert.match(invoice.id, /^inv-\d{4}-\d{4}$/);
+assert.equal(invoice.plan, 'PRO');
+assert.equal(invoice.amount, 499);
+assert.equal(invoice.currency, 'NPR');
+assert.equal(invoice.method, 'demo');
+assert.equal(invoice.status, 'paid');
+const seed = billingHistorySeed();
+assert.equal(seed.length, 1);
+assert.equal(seed[0].plan, 'FREE');
+assert.equal(seed[0].amount, 0);
+
+// Server authorization seam
+assert.deepEqual(requirePlan('emailAlerts', { plan: 'PRO', status: 'active', subscriptionId: 'x' }), { ok: true, plan: 'PRO', required: 'PRO', capability: 'emailAlerts' });
+assert.deepEqual(requirePlan('emailAlerts', { plan: 'FREE', status: 'active', subscriptionId: 'x' }).ok, false);
+assert.deepEqual(requirePlan('emailAlerts', { plan: 'PRO', status: 'cancelled', subscriptionId: 'x' }).ok, false);
+assert.deepEqual(requirePlan('emailAlerts', { plan: 'FREE', status: 'active', subscriptionId: 'x' }).required, 'PRO');
+
+// PAYMENT_MODE from env
+assert.ok(['demo','live'].includes(PAYMENT_MODE));
+
 console.log('Hamro Byapar smoke tests passed.');

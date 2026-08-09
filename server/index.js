@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
 import { createEmailService } from './emailService.js';
+import { SUBSCRIPTION_PLANS, PAYMENT_MODE } from '../src/subscription/plans.js';
 
 const emailService = createEmailService();
 const port = Number(process.env.EMAIL_SERVER_PORT || 4175);
@@ -41,6 +42,12 @@ const server = createServer(async (request, response) => {
   }
   if (request.method === 'GET' && request.url === '/api/health') {
     sendJson(response, 200, { ok: true, emailConfigured: emailService.configured }, origin);
+    return;
+  }
+  // Read-only plan config, served from the single source of truth so a future
+  // account server can consume it. No state, no database, no writes.
+  if (request.method === 'GET' && request.url === '/api/subscription/plans') {
+    sendJson(response, 200, { ok: true, paymentMode: PAYMENT_MODE, plans: SUBSCRIPTION_PLANS }, origin);
     return;
   }
   if (request.method === 'POST' && request.url === '/api/alerts/stock') {

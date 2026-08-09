@@ -16,7 +16,7 @@ const voiceDebug = (event, details = {}) => {
   if (import.meta.env.DEV) console.info(`[Hamro Voice] ${event}`, details);
 };
 
-export default function VoiceAssistant({ products, sales, lang, t, onClose, onSave, onUndo, autoStart = false }) {
+export default function VoiceAssistant({ products, sales, lang, t, onClose, onSave, onUndo, autoStart = false, requireAi, onAiUse }) {
   const [mode, setMode] = useState('idle');
   const [transcript, setTranscript] = useState('');
   const [parsed, setParsed] = useState(null);
@@ -57,6 +57,8 @@ export default function VoiceAssistant({ products, sales, lang, t, onClose, onSa
       const result = parseVoiceCommand(spoken, products);
       setParsed(result);
       if (result.kind === 'question') {
+        if (requireAi && !requireAi()) return;
+        onAiUse?.();
         setAnswer(answerVoiceQuestion(result.question, sales, products, lang));
         setMode('question');
         return;

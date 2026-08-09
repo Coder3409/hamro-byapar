@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle, ArrowRight, BarChart3, Bell, Bot, Check, ChevronRight, CircleDollarSign,
-  CloudOff, FileText, LayoutDashboard, Lightbulb, Menu, Mic, MonitorUp, Package, Plus, Search, Settings,
+  CloudOff, CreditCard, FileText, LayoutDashboard, Lightbulb, Menu, Mic, MonitorUp, Package, Plus, Search, Settings,
   ShoppingBag, ShoppingCart, Sparkles, Store, TrendingDown, TrendingUp, Users, Wallet, X,
 } from 'lucide-react';
 import { createDemoSales, demoProducts, demoProfile } from './data/demo';
@@ -11,11 +11,21 @@ import { sendStockAlertEmail } from './services/notifications';
 import { chartData, dateKey, getInsights, money, summarize } from './utils/analytics';
 import { createStockAlertBaseline, evaluateStockAlerts, resolveNotifications, updateNotificationEmailStatus } from './utils/stockAlerts';
 import VoiceAssistant from './components/voice/VoiceAssistant';
+import { SUBSCRIPTION_PLANS, planById, isDemoPayment } from './subscription/plans';
+import { canAccess, missingPlanFor } from './subscription/access';
+import { legacySubscription, normalizeSubscription, refreshStatus } from './subscription/store';
+import { newUsage, monthRollover, recordAiUsage, usageSummary } from './subscription/usage';
+import { billingHistorySeed } from './subscription/invoices';
+import { activateSubscription, cancelSubscription, createCheckout, verifyPayment } from './services/paymentService';
+import SubscriptionPage from './components/subscription/SubscriptionPage';
+import UpgradeModal from './components/subscription/UpgradeModal';
+import ManageSubscriptionModal from './components/subscription/ManageSubscriptionModal';
+import CancelConfirmModal from './components/subscription/CancelConfirmModal';
 
 const nav = [
   ['dashboard', LayoutDashboard, 'dashboard'], ['sales', ShoppingCart, 'sales'], ['inventory', Package, 'inventory'],
   ['analytics', BarChart3, 'analytics'], ['ai', Bot, 'ai'], ['customers', Users, 'customers'],
-  ['reports', FileText, 'reports'], ['settings', Settings, 'settings'],
+  ['reports', FileText, 'reports'], ['subscription', CreditCard, 'subscription'], ['settings', Settings, 'settings'],
 ];
 
 function Logo({ compact = false }) {
@@ -139,26 +149,30 @@ function InventoryPage({ products, lang, t, addProduct, editStock, searchQuery =
   return <div className="page fade-in"><section className="page-title"><div><span className="eyebrow">{t('stock')}</span><h1>{t('inventory')}</h1><p>{products.length} {t('products')} · {products.filter((p) => p.stock <= p.lowStock).length} {t('itemsNeedAttention')}</p></div><Button onClick={addProduct}><Plus/>{t('addProduct')}</Button></section><Alerts products={products} lang={lang} t={t} limit={3}/><article className="card inventory-card"><div className="inventory-tools"><div className="search"><Search size={18}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`${t('product')}...`}/></div></div><div className="inventory-table"><div className="inventory-head"><span>{t('product')}</span><span>{t('stock')}</span><span>{t('price')}</span><span>{t('sales')}</span><span>{t('status')}</span></div>{rows.map((p) => { const [key,tone] = status(p); return <div className="inventory-row" key={p.id}><div><span className="product-symbol">{(lang === 'ne' ? p.nameNe : p.name).charAt(0)}</span><span><strong>{lang === 'ne' ? p.nameNe : p.name}</strong><small>{p.category}</small></span></div><button className="stock-edit" onClick={() => editStock(p)} aria-label={`${t('updateStock')}: ${lang === 'ne' ? p.nameNe : p.name}`}><strong>{p.stock.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')}</strong> {t('units')}</button><span>{money(p.sellingPrice, lang)}</span><span>{p.sold.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')} {t('units')}</span><span className={`status ${tone}`}><i/>{t(key)}</span></div>; })}</div></article></div>;
 }
 
-function AIPage({ sales, products, lang, t }) {
+function AIPage({ sales, products, lang, t, requireAi, onAiUsed }) {
   const insight = getInsights(sales, products, lang); const [selected, setSelected] = useState(5);
   const questions = ['qToday','qBest','qSlow','qRestock','qCompare','qWatch'];
   const card = insight.cards[selected === 1 ? 0 : selected === 2 ? 2 : selected === 3 || selected === 5 ? 1 : 0];
-  return <div className="page fade-in ai-page"><section className="ai-hero"><div className="ai-orb"><Bot size={34}/><i/></div><div><span>{t('ai')}</span><h1>{t('aiSubtitle')}</h1><p>{t('localInsight')}</p></div></section><div className="ai-layout"><aside className="card question-card"><div className="card-heading"><div><span className="eyebrow">{t('quickQuestions')}</span><h2>{t('askAi')}</h2></div></div>{questions.map((q,i) => <button key={q} className={selected === i ? 'active' : ''} onClick={() => setSelected(i)}><span>{i === 5 ? <AlertTriangle/> : i === 3 ? <Package/> : i === 1 ? <TrendingUp/> : <Lightbulb/>}</span>{t(q)}<ChevronRight/></button>)}</aside><section className="ai-response card"><div className="ai-response-label"><Sparkles size={17}/>{t('aiSays')}</div><h2>{card.insight}</h2><div className="response-points"><div><span className="point-icon green"><Lightbulb/></span><div><small>{t('insight')}</small><p>{card.insight}</p></div></div><div><span className="point-icon blue"><BarChart3/></span><div><small>{t('why')}</small><p>{card.reason}</p></div></div><div><span className="point-icon gold"><ArrowRight/></span><div><small>{t('action')}</small><p>{card.action}</p></div></div></div><div className="offline-note"><Check/>{t('localInsight')}</div></section></div></div>;
+  const choose = (i) => { if (requireAi) { if (!requireAi()) return; onAiUsed?.(); } setSelected(i); };
+  return <div className="page fade-in ai-page"><section className="ai-hero"><div className="ai-orb"><Bot size={34}/><i/></div><div><span>{t('ai')}</span><h1>{t('aiSubtitle')}</h1><p>{t('localInsight')}</p></div></section><div className="ai-layout"><aside className="card question-card"><div className="card-heading"><div><span className="eyebrow">{t('quickQuestions')}</span><h2>{t('askAi')}</h2></div></div>{questions.map((q,i) => <button key={q} className={selected === i ? 'active' : ''} onClick={() => choose(i)}><span>{i === 5 ? <AlertTriangle/> : i === 3 ? <Package/> : i === 1 ? <TrendingUp/> : <Lightbulb/>}</span>{t(q)}<ChevronRight/></button>)}</aside><section className="ai-response card"><div className="ai-response-label"><Sparkles size={17}/>{t('aiSays')}</div><h2>{card.insight}</h2><div className="response-points"><div><span className="point-icon green"><Lightbulb/></span><div><small>{t('insight')}</small><p>{card.insight}</p></div></div><div><span className="point-icon blue"><BarChart3/></span><div><small>{t('why')}</small><p>{card.reason}</p></div></div><div><span className="point-icon gold"><ArrowRight/></span><div><small>{t('action')}</small><p>{card.action}</p></div></div></div><div className="offline-note"><Check/>{t('localInsight')}</div></section></div></div>;
 }
 
-function SettingsPage({ profile, setProfile, presentation, setPresentation, t, loadDemo }) {
+function SettingsPage({ profile, setProfile, presentation, setPresentation, t, loadDemo, subscription, openManage, openUpgrade, openCancel }) {
   const [draft, setDraft] = useState(profile);
   const update = (key) => (e) => setDraft({ ...draft, [key]: e.target.value });
-  return <div className="page fade-in"><section className="page-title"><div><span className="eyebrow">{t('settings')}</span><h1>{t('shopProfile')}</h1><p>{t('dataOnDevice')}</p></div></section><div className="presentation-setting card"><div className="presentation-setting-icon"><MonitorUp/></div><div><strong>{t('presentationMode')}</strong><p>{t('presentationHelp')}</p></div><button type="button" role="switch" aria-label={t('presentationMode')} aria-checked={presentation} className={`toggle ${presentation ? 'on' : ''}`} onClick={() => setPresentation(!presentation)}><i/></button></div><div className="settings-grid"><form className="card settings-card" onSubmit={(e) => { e.preventDefault(); setProfile(draft); }}><div className="settings-icon"><Store/></div><div className="form-grid"><label>{t('shopName')}<input value={draft.shopName} onChange={update('shopName')}/></label><label>{t('ownerName')}<input value={draft.ownerName} onChange={update('ownerName')}/></label><label>{t('shopType')}<select value={draft.shopType} onChange={update('shopType')}><option>Kirana</option><option>Clothing</option><option>Electronics</option><option>Stationery</option><option>Pharmacy</option><option>Restaurant</option><option>Other</option></select></label><label>{t('location')}<input value={draft.location} onChange={update('location')}/></label><label>{t('currency')}<input value={draft.currency} readOnly/></label></div><Button type="submit"><Check/>{t('saveChanges')}</Button></form><aside className="card demo-card"><span><Sparkles/></span><h2>{t('demoShop')}</h2><p>{t('demoHelp')}</p><Button onClick={loadDemo}><Store/>{t('loadDemo')}</Button><small>{officialSlogan}</small></aside></div></div>;
+  const subPlan = subscription ? planById(subscription.plan) : planById('FREE');
+  const subStatusKey = `status_${subscription?.status || 'active'}`;
+  const nextBilling = subscription?.renewalDate ? new Date(subscription.renewalDate).toLocaleDateString(lang === 'ne' ? 'ne-NP' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
+  return <div className="page fade-in"><section className="page-title"><div><span className="eyebrow">{t('settings')}</span><h1>{t('shopProfile')}</h1><p>{t('dataOnDevice')}</p></div></section><div className="presentation-setting card"><div className="presentation-setting-icon"><MonitorUp/></div><div><strong>{t('presentationMode')}</strong><p>{t('presentationHelp')}</p></div><button type="button" role="switch" aria-label={t('presentationMode')} aria-checked={presentation} className={`toggle ${presentation ? 'on' : ''}`} onClick={() => setPresentation(!presentation)}><i/></button></div><section className="card subscription-setting"><div className="subscription-setting-icon"><CreditCard/></div><div className="subscription-setting-main"><span className="eyebrow">{t('subscription')}</span><div className="subscription-plan-row"><h2>{t(subPlan.nameKey || `plan_${subPlan.id.toLowerCase()}`)}</h2><span className={`sub-status-chip ${subscription?.status || 'active'}`}>{t(subStatusKey)}</span></div><p>{t('nextBillingDate')}: <strong>{nextBilling}</strong></p></div><div className="subscription-setting-actions"><Button variant="secondary" onClick={openManage}>{t('featureManage')}</Button><Button variant="navy" onClick={openUpgrade}>{t('upgradePlan')}</Button>{subscription?.plan !== 'FREE' && <Button variant="secondary" onClick={openCancel}>{t('cancelPlan')}</Button>}</div></section><div className="settings-grid"><form className="card settings-card" onSubmit={(e) => { e.preventDefault(); setProfile(draft); }}><div className="settings-icon"><Store/></div><div className="form-grid"><label>{t('shopName')}<input value={draft.shopName} onChange={update('shopName')}/></label><label>{t('ownerName')}<input value={draft.ownerName} onChange={update('ownerName')}/></label><label>{t('shopType')}<select value={draft.shopType} onChange={update('shopType')}><option>Kirana</option><option>Clothing</option><option>Electronics</option><option>Stationery</option><option>Pharmacy</option><option>Restaurant</option><option>Other</option></select></label><label>{t('location')}<input value={draft.location} onChange={update('location')}/></label><label>{t('currency')}<input value={draft.currency} readOnly/></label></div><Button type="submit"><Check/>{t('saveChanges')}</Button></form><aside className="card demo-card"><span><Sparkles/></span><h2>{t('demoShop')}</h2><p>{t('demoHelp')}</p><Button onClick={loadDemo}><Store/>{t('loadDemo')}</Button><small>{officialSlogan}</small></aside></div></div>;
 }
 
-function CustomersPage({ t }) {
-  return <div className="page fade-in"><section className="page-title"><div><span className="eyebrow">{t('customers')}</span><h1>{t('customerHub')}</h1><p>{t('customerHelp')}</p></div><Button variant="navy" disabled><Plus/>{t('addCustomer')}</Button></section><section className="card feature-empty"><span><Users/></span><h2>{t('customerHub')}</h2><p>{t('customerEmpty')}</p></section></div>;
+function CustomersPage({ t, openUpgrade }) {
+  return <div className="page fade-in"><section className="page-title"><div><span className="eyebrow">{t('customers')}</span><h1>{t('customerHub')}</h1><p>{t('customerHelp')}</p></div><Button variant="navy" onClick={openUpgrade}><Plus/>{t('addCustomer')}</Button></section><section className="card feature-empty"><span><Users/></span><h2>{t('customerHub')}</h2><p>{t('customerEmpty')}</p></section></div>;
 }
 
-function ReportsPage({ sales, products, lang, t }) {
+function ReportsPage({ sales, products, lang, t, openUpgrade }) {
   const summary = summarize(sales, products);
-  return <div className="page fade-in"><section className="page-title"><div><span className="eyebrow">{t('reports')}</span><h1>{t('businessReports')}</h1><p>{t('reportHelp')}</p></div></section><section className="metrics report-metrics"><MetricCard icon={Wallet} label={t('revenue')} value={money(summary.revenue, lang)} note={t('thirtyDays')} tone="green"/><MetricCard icon={CircleDollarSign} label={t('profit')} value={money(summary.profit, lang)} note={`${summary.revenue ? Math.round(summary.profit / summary.revenue * 100) : 0}%`} tone="gold"/><MetricCard icon={ShoppingBag} label={t('transactions')} value={summary.transactions.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')} note={`${summary.unitsSold} ${t('unitsSold')}`} tone="blue"/><MetricCard icon={AlertTriangle} label={t('lowStock')} value={summary.lowStock} note={t('itemsNeedAttention')} tone="red"/></section><SalesChart sales={sales} lang={lang} t={t}/></div>;
+  return <div className="page fade-in"><section className="page-title"><div><span className="eyebrow">{t('reports')}</span><h1>{t('businessReports')}</h1><p>{t('reportHelp')}</p></div><Button variant="navy" onClick={openUpgrade}><FileText/>{t('exportReports')}</Button></section><section className="metrics report-metrics"><MetricCard icon={Wallet} label={t('revenue')} value={money(summary.revenue, lang)} note={t('thirtyDays')} tone="green"/><MetricCard icon={CircleDollarSign} label={t('profit')} value={money(summary.profit, lang)} note={`${summary.revenue ? Math.round(summary.profit / summary.revenue * 100) : 0}%`} tone="gold"/><MetricCard icon={ShoppingBag} label={t('transactions')} value={summary.transactions.toLocaleString(lang === 'ne' ? 'ne-NP' : 'en-IN')} note={`${summary.unitsSold} ${t('unitsSold')}`} tone="blue"/><MetricCard icon={AlertTriangle} label={t('lowStock')} value={summary.lowStock} note={t('itemsNeedAttention')} tone="red"/></section><SalesChart sales={sales} lang={lang} t={t}/></div>;
 }
 
 function App() {
@@ -166,9 +180,10 @@ function App() {
   const [presentation, setPresentationState] = useState(() => localStorage.getItem('hamro-presentation') === 'true');
   const [products, setProducts] = useState([]); const [sales, setSales] = useState([]); const [profile, setProfileState] = useState(demoProfile); const [online, setOnline] = useState(navigator.onLine);
   const [notifications, setNotifications] = useState([]); const [alertStates, setAlertStates] = useState({}); const alertStatesRef = useRef({}); const [globalSearch, setGlobalSearch] = useState('');
+  const [subscription, setSubscription] = useState(null); const [aiUsage, setAiUsage] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false); const [modal, setModal] = useState(null); const [notificationsOpen, setNotificationsOpen] = useState(false); const [toast, setToast] = useState(''); const t = (key) => translate(lang, key);
-  useEffect(() => { loadData().then((data) => { const initial = data || { products: demoProducts, sales: createDemoSales(), profile: demoProfile }; const initialAlertStates = initial.alertStates || createStockAlertBaseline(initial.products); alertStatesRef.current = initialAlertStates; setProducts(initial.products); setSales(initial.sales); setProfileState(initial.profile); setNotifications(initial.notifications || []); setAlertStates(initialAlertStates); setReady(true); }); }, []);
-  useEffect(() => { if (ready) saveData({ products, sales, profile, notifications, alertStates }); }, [products, sales, profile, notifications, alertStates, ready]);
+  useEffect(() => { loadData().then((data) => { const initial = data || { products: demoProducts, sales: createDemoSales(), profile: demoProfile }; const initialAlertStates = initial.alertStates || createStockAlertBaseline(initial.products); const initialSubscription = normalizeSubscription(initial.subscription, refreshStatus(initial.subscription ? initial.subscription : legacySubscription())); alertStatesRef.current = initialAlertStates; setProducts(initial.products); setSales(initial.sales); setProfileState(initial.profile); setNotifications(initial.notifications || []); setAlertStates(initialAlertStates); setSubscription(refreshStatus(initialSubscription)); setAiUsage(monthRollover(initial.aiUsage || newUsage())); setReady(true); }); }, []);
+  useEffect(() => { if (ready) saveData({ products, sales, profile, notifications, alertStates, subscription, aiUsage }); }, [products, sales, profile, notifications, alertStates, ready, subscription, aiUsage]);
   useEffect(() => {
     if (!ready) return;
     const result = evaluateStockAlerts(products, alertStatesRef.current);
@@ -186,11 +201,12 @@ function App() {
           return next;
         });
       };
-      sendStockAlertEmail(alert, product, profile)
+      const emailAllowed = canAccess('emailAlerts', subscription);
+      emailAllowed ? sendStockAlertEmail(alert, product, profile)
         .then((delivery) => updateDelivery(delivery.delivered || delivery.duplicate ? 'sent' : 'failed'))
-        .catch((emailError) => { console.warn('[Hamro Byapar alerts] Email delivery failed:', emailError.message); updateDelivery('failed'); });
+        .catch((emailError) => { console.warn('[Hamro Byapar alerts] Email delivery failed:', emailError.message); updateDelivery('failed'); }) : updateDelivery('skipped');
     });
-  }, [products, profile, ready]);
+  }, [products, profile, ready, subscription]);
   useEffect(() => { document.documentElement.lang = lang; document.documentElement.dataset.lang = lang; localStorage.setItem('hamro-language', lang); }, [lang]);
   useEffect(() => { localStorage.setItem('hamro-presentation', String(presentation)); }, [presentation]);
   useEffect(() => { const update = () => setOnline(navigator.onLine); addEventListener('online', update); addEventListener('offline', update); return () => { removeEventListener('online', update); removeEventListener('offline', update); }; }, []);
@@ -214,11 +230,43 @@ function App() {
   const updateProfile = (value) => { setProfileState(value); notify(t('saved')); };
   const markAllRead = () => setNotifications((old) => old.map((notification) => ({ ...notification, isRead: true })));
   const loadDemo = () => { const nextProducts = demoProducts.map((p) => ({ ...p })); const baseline = createStockAlertBaseline(nextProducts); alertStatesRef.current = baseline; setProducts(nextProducts); setSales(createDemoSales()); setProfileState(demoProfile); setNotifications([]); setAlertStates(baseline); setModal(null); setPage('dashboard'); notify(t('demoLoaded')); };
-  const pageProps = { sales, products, profile, lang, t, setPage };
+  const plan = subscription ? planById(subscription.plan) : planById('FREE');
+  const upgradeTo = async (planId) => {
+    const target = planById(planId);
+    if (target.price > 0 && !isDemoPayment()) { notify(t('paymentNotConfigured')); return; }
+    try {
+      setModal({ type: 'processing-upgrade', plan: target });
+      const checkout = await createCheckout({ planId: target.id, subscription });
+      await verifyPayment(checkout, subscription);
+      const { updated, invoice } = await activateSubscription(subscription, target.id, { currentHistory: subscription?.billingHistory || [] });
+      setSubscription(updated);
+      setAiUsage((current) => current || newUsage());
+      setModal(null);
+      setPage('subscription');
+      notify(target.price > 0 ? t('planUpgraded') : t('planDowngraded'));
+    } catch (error) {
+      console.warn('[Hamro Byapar subscription] Upgrade failed:', error.message);
+      setModal(null);
+      notify(t('upgradeFailed'));
+    }
+  };
+  const downgradeToFree = async () => {
+    if (!subscription || subscription.plan === 'FREE') return;
+    setSubscription(await cancelSubscription(subscription));
+    notify(t('planDowngraded'));
+    setModal(null);
+  };
+  const canUseAi = () => { const summary = usageSummary(aiUsage, plan.plan); return !summary.reached; };
+  const requireAi = () => {
+    if (!canAccess('aiInsights', subscription) || !canUseAi()) { setModal({ type: 'upgrade', reason: 'ai_limit' }); return false; }
+    return true;
+  };
+  const onAiUsed = () => setAiUsage((prev) => recordAiUsage(prev));
+  const pageProps = { sales, products, profile, lang, t, setPage, subscription, aiUsage, canAccess, upgradeModal: (cap) => setModal({ type: 'upgrade', capability: cap }) };
   const analyticsPage = <div className="page fade-in"><section className="page-title"><div><span className="eyebrow">{t('analytics')}</span><h1>{t('salesTrend')}</h1><p>{officialSlogan}</p></div></section><SalesChart sales={sales} lang={lang} t={t}/><div className="two-column"><ProductRanking products={products} t={t} lang={lang}/><ProductRanking products={products} t={t} lang={lang} slow/></div></div>;
-  const content = page === 'dashboard' ? <Dashboard {...pageProps} openVoice={() => setModal({ type: 'voice' })} openSale={() => setModal({ type: 'sale' })}/> : page === 'sales' ? <SalesPage {...pageProps} openVoice={() => setModal({ type: 'voice' })} openSale={() => setModal({ type: 'sale' })} quickSell={(product) => setModal({ type: 'sale', product })}/> : page === 'inventory' ? <InventoryPage {...pageProps} searchQuery={globalSearch} addProduct={() => setModal({ type: 'product' })} editStock={(product) => setModal({ type: 'stock', product })}/> : page === 'analytics' ? analyticsPage : page === 'ai' ? <AIPage {...pageProps}/> : page === 'customers' ? <CustomersPage t={t}/> : page === 'reports' ? <ReportsPage {...pageProps}/> : <SettingsPage {...pageProps} presentation={presentation} setPresentation={setPresentation} setProfile={updateProfile} loadDemo={loadDemo}/>;
+  const content = page === 'dashboard' ? <Dashboard {...pageProps} openVoice={() => setModal({ type: 'voice' })} openSale={() => setModal({ type: 'sale' })}/> : page === 'sales' ? <SalesPage {...pageProps} openVoice={() => setModal({ type: 'voice' })} openSale={() => setModal({ type: 'sale' })} quickSell={(product) => setModal({ type: 'sale', product })}/> : page === 'inventory' ? <InventoryPage {...pageProps} searchQuery={globalSearch} addProduct={() => setModal({ type: 'product' })} editStock={(product) => setModal({ type: 'stock', product })}/> : page === 'analytics' ? analyticsPage : page === 'ai' ? <AIPage {...pageProps} requireAi={requireAi} onAiUsed={onAiUsed}/> : page === 'customers' ? <CustomersPage t={t} openUpgrade={() => setModal({ type: 'upgrade', capability: 'multiStaff' })}/> : page === 'reports' ? <ReportsPage {...pageProps} openUpgrade={() => setModal({ type: 'upgrade', capability: 'exportReports' })}/> : page === 'subscription' ? <SubscriptionPage {...pageProps} billingHistory={(subscription?.billingHistory) || []} onPlanSelect={upgradeTo}/> : <SettingsPage {...pageProps} presentation={presentation} setPresentation={setPresentation} setProfile={updateProfile} loadDemo={loadDemo} subscription={subscription} openManage={() => setModal({ type: 'manage' })} openUpgrade={() => setModal({ type: 'upgrade', capability: 'advancedAnalytics' })} openCancel={() => setModal({ type: 'cancel' })}/>;
   if (!ready) return <div className="loading-screen"><Logo/><div className="loading-bar"><i/></div><span>{officialSlogan}</span></div>;
-  return <div className={`app-shell ${presentation ? 'presentation' : ''}`}><Sidebar page={page} setPage={setPage} t={t} open={menuOpen} setOpen={setMenuOpen} profile={profile} online={online}/><main><Header lang={lang} setLang={setLang} online={online} presentation={presentation} t={t} page={page} setMenuOpen={setMenuOpen} setPage={setPage} onSearch={setGlobalSearch} notifications={notifications} notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} markAllRead={markAllRead}/>{content}<footer>{officialSlogan}</footer></main><nav className="mobile-nav">{[['dashboard',LayoutDashboard,'home'],['sales',ShoppingCart,'sales'],['inventory',Package,'inventory'],['ai',Bot,'ai'],['settings',Settings,'more']].map(([id,Icon,key]) => <button key={id} className={page === id ? 'active' : ''} onClick={() => setPage(id)}><Icon/><span>{t(key)}</span></button>)}</nav>{modal?.type === 'sale' && <SaleModal products={products} lang={lang} t={t} preset={modal.product} onClose={() => setModal(null)} onSave={saveSale}/>} {modal?.type === 'product' && <ProductModal t={t} onClose={() => setModal(null)} onSave={saveProduct}/>} {modal?.type === 'stock' && <StockModal product={modal.product} lang={lang} t={t} onClose={() => setModal(null)} onSave={updateProductStock}/>} {modal?.type === 'voice' && <VoiceAssistant products={products} sales={sales} lang={lang} t={t} autoStart onClose={() => setModal(null)} onSave={saveVoiceSale} onUndo={undoVoiceSale}/>}<Toast message={toast}/></div>;
+  return <div className={`app-shell ${presentation ? 'presentation' : ''}`}><Sidebar page={page} setPage={setPage} t={t} open={menuOpen} setOpen={setMenuOpen} profile={profile} online={online}/><main><Header lang={lang} setLang={setLang} online={online} presentation={presentation} t={t} page={page} setMenuOpen={setMenuOpen} setPage={setPage} onSearch={setGlobalSearch} notifications={notifications} notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} markAllRead={markAllRead}/>{content}<footer>{officialSlogan}</footer></main><nav className="mobile-nav">{[['dashboard',LayoutDashboard,'home'],['sales',ShoppingCart,'sales'],['inventory',Package,'inventory'],['ai',Bot,'ai'],['settings',Settings,'more']].map(([id,Icon,key]) => <button key={id} className={page === id ? 'active' : ''} onClick={() => setPage(id)}><Icon/><span>{t(key)}</span></button>)}</nav>{modal?.type === 'sale' && <SaleModal products={products} lang={lang} t={t} preset={modal.product} onClose={() => setModal(null)} onSave={saveSale}/>} {modal?.type === 'product' && <ProductModal t={t} onClose={() => setModal(null)} onSave={saveProduct}/>} {modal?.type === 'stock' && <StockModal product={modal.product} lang={lang} t={t} onClose={() => setModal(null)} onSave={updateProductStock}/>} {modal?.type === 'voice' && <VoiceAssistant products={products} sales={sales} lang={lang} t={t} aiUsageInfo={usageSummary(aiUsage, plan.plan)} onAiUse={onAiUsed} requireAi={requireAi} autoStart onClose={() => setModal(null)} onSave={saveVoiceSale} onUndo={undoVoiceSale}/>} {modal?.type === 'upgrade' && <UpgradeModal capability={modal.capability || 'advancedAnalytics'} reason={modal.reason} subscription={subscription} t={t} lang={lang} onUpgrade={(planId) => { setModal(null); upgradeTo(planId); }} onClose={() => setModal(null)}/>} {modal?.type === 'manage' && subscription && <ManageSubscriptionModal subscription={subscription} t={t} lang={lang} onUpgrade={(planId) => { setModal(null); upgradeTo(planId); }} onCancel={() => setModal({ type: 'cancel' })} onClose={() => setModal(null)}/>} {modal?.type === 'cancel' && subscription && <CancelConfirmModal subscription={subscription} t={t} onConfirm={() => downgradeToFree()} onClose={() => setModal(null)}/>}<Toast message={toast}/></div>;
 }
 
 export default App;
