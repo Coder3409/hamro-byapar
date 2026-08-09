@@ -132,6 +132,7 @@ export function buildBusinessContext({ sales = [], products = [], profile = {}, 
     // Today's snapshot
     today: {
       revenue: todayRevenue,
+      yesterdayRevenue,
       revenueFormatted: money(todayRevenue, lang),
       profit: todayProfit,
       profitFormatted: money(todayProfit, lang),
@@ -147,6 +148,7 @@ export function buildBusinessContext({ sales = [], products = [], profile = {}, 
     // Weekly snapshot
     week: {
       revenue: thisWeekRevenue,
+      lastWeekRevenue,
       revenueFormatted: money(thisWeekRevenue, lang),
       vsLastWeek: revenueVsLastWeek,
       vsLastWeekLabel: revenueVsLastWeek !== null

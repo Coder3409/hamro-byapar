@@ -78,12 +78,6 @@ export default function AIInsightsPanel({ insights, t, lang, onNavigate }) {
               <div className="insight-why">
                 <strong>{t('why')}:</strong> {insight.why}
               </div>
-              {insight.data && Object.keys(insight.data).length > 0 && (
-                <div className="insight-data">
-                  <strong>{t('data')}:</strong>
-                  <pre>{JSON.stringify(insight.data, null, 2)}</pre>
-                </div>
-              )}
             </div>
             {insight.action && (
               <div className="insight-action">

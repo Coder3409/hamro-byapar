@@ -32,7 +32,15 @@ export async function loadData() {
 }
 
 export async function saveData(value) {
-  localStorage.setItem(FALLBACK, JSON.stringify(value));
+  let fallbackSaved = false;
+  let databaseSaved = false;
+  let lastError;
+  try {
+    localStorage.setItem(FALLBACK, JSON.stringify(value));
+    fallbackSaved = true;
+  } catch (error) {
+    lastError = error;
+  }
   try {
     const db = await openDb();
     await Promise.race([
@@ -45,5 +53,10 @@ export async function saveData(value) {
       new Promise((_, reject) => setTimeout(() => reject(new Error('IndexedDB write timeout')), 2000))
     ]);
     db.close();
-  } catch { /* LocalStorage keeps an offline fallback. */ }
+    databaseSaved = true;
+  } catch (error) {
+    lastError = error;
+  }
+  if (!fallbackSaved && !databaseSaved) throw lastError || new Error('Unable to save app data.');
+  return { fallbackSaved, databaseSaved };
 }

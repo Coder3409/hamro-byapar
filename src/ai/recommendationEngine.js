@@ -223,8 +223,8 @@ export function generateRecommendations(context) {
         ? `बिक्री ${Math.abs(context.week.vsLastWeek)}% घटेको छ। कारण पहिचान गर्न बिक्री विवरण हेर्नुहोस्।`
         : `Sales dropped ${Math.abs(context.week.vsLastWeek)}%. Review sales details to identify cause.`,
       why: context.lang === 'ne'
-        ? `गत हप्ता: ${money(context.week.revenue - (context.week.revenue * context.week.vsLastWeek / 100), context.lang)}। यस हप्ता: ${money(context.week.revenue, context.lang)}।`
-        : `Last week: ${money(context.week.revenue - (context.week.revenue * context.week.vsLastWeek / 100), context.lang)}. This week: ${money(context.week.revenue, context.lang)}.`,
+        ? `गत हप्ता: ${money(context.week.lastWeekRevenue, context.lang)}। यस हप्ता: ${money(context.week.revenue, context.lang)}।`
+        : `Last week: ${money(context.week.lastWeekRevenue, context.lang)}. This week: ${money(context.week.revenue, context.lang)}.`,
       action: {
         label: context.lang === 'ne' ? 'बिक्री विश्लेषण हेर्नुहोस्' : 'View Sales Analytics',
         route: 'analytics',

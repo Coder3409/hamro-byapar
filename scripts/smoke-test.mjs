@@ -8,6 +8,7 @@ import { sendStockAlertEmail } from '../src/services/notifications.js';
 import { chartData, getInsights, money, summarize } from '../src/utils/analytics.js';
 import { configureRecognition, getSpeechRecognitionConstructor, microphoneErrorKey, recognitionErrorKey, recognitionLanguage, requestMicrophonePermission, shouldFallbackRecognitionLanguage } from '../src/utils/speechRecognition.js';
 import { createStockAlertBaseline, evaluateStockAlerts, resolveNotifications, stockAlertLevel, updateNotificationEmailStatus } from '../src/utils/stockAlerts.js';
+import { calculateVat, normalizeVatProfile, normalizeVatRate, summarizeVat, vatFromSale } from '../src/utils/vat.js';
 import { answerVoiceQuestion, calculateVoiceSale, parseVoiceCommand } from '../src/utils/voiceParser.js';
 
 const sales = createDemoSales();
@@ -27,6 +28,23 @@ assert.equal(translate('en', 'customers'), 'Customers');
 assert.equal(translate('ne', 'reports'), 'रिपोर्ट');
 assert.match(translate('ne', 'aiCompanion'), /व्यवसायिक साथी/);
 assert.match(money(12450, 'en'), /12,450/);
+
+const exclusiveVat = calculateVat({ amount: 1000, rate: 13, inclusive: false, applicable: true });
+assert.deepEqual(exclusiveVat, { applicable: true, rate: 13, inclusive: false, taxableAmount: 1000, vatAmount: 130, total: 1130 });
+const inclusiveVat = calculateVat({ amount: 1130, rate: 13, inclusive: true, applicable: true });
+assert.deepEqual(inclusiveVat, { applicable: true, rate: 13, inclusive: true, taxableAmount: 1000, vatAmount: 130, total: 1130 });
+assert.equal(normalizeVatRate(-5), 0);
+assert.equal(normalizeVatRate(150), 100);
+assert.deepEqual(normalizeVatProfile({ shopName: 'Test Shop' }), { shopName: 'Test Shop', vatEnabled: false, vatRegistrationNumber: '', vatRate: 13, pricesIncludeVat: true });
+const vatSale = { id: 'vat-1', total: 1130, vatApplicable: true, vatRate: 13, vatInclusive: true, taxableAmount: 1000, vatAmount: 130 };
+assert.equal(vatFromSale(vatSale).vatAmount, 130);
+const vatSummary = summarizeVat([vatSale, { id: 'non-vat-1', total: 500, vatApplicable: false }]);
+assert.equal(vatSummary.taxableSales, 1000);
+assert.equal(vatSummary.outputVat, 130);
+assert.equal(vatSummary.vatableTransactions, 1);
+assert.equal(vatSummary.nonVatTransactions, 1);
+assert.equal(vatSummary.inputVat, null);
+assert.equal(vatSummary.netVat, null);
 
 const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
 assert.equal(manifest.theme_color, '#061b3a');

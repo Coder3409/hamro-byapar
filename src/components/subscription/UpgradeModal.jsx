@@ -26,7 +26,7 @@ export default function UpgradeModal({ capability = 'advancedAnalytics', reason,
     <section className="modal-card upgrade-modal" role="dialog" aria-modal="true" aria-label={t('upgradePlan')}>
       <header className="upgrade-header">
         <span className="upgrade-lock"><Crown size={22}/></span>
-        <div><h2>{t('unlockFeature').replace('{feature}', featureLabel)}</h2><p>{t('upgradePrompt', { feature: featureLabel, plan: requiredLabel })}</p></div>
+        <div><h2>{t('unlockFeature').replace('{feature}', featureLabel)}</h2><p>{t('upgradePrompt').replace('{feature}', featureLabel).replace('{plan}', requiredLabel)}</p></div>
         <button className="icon-button" onClick={onClose} aria-label={t('close')}><X size={20}/></button>
       </header>
       <div className="upgrade-required"><span><Lock size={15}/>{t('requiredPlan')}</span><strong>{requiredLabel}</strong></div>

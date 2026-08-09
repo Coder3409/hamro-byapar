@@ -88,8 +88,8 @@ export function generateInsights(context) {
         ? `${topProduct.name} सबैभन्दा धेरै बिक्री भइरहेको छ`
         : `${topProduct.name} is your best-selling product`,
       explanation: context.lang === 'ne'
-        ? `यो सामानले ${topProduct.sold} ${context.lang === 'ne' ? 'वटा' : 'units'} बिक्री गरी ${topProduct.revenueFormatted} रकम उठाएको छ।`
-        : `This product sold ${topProduct.sold} units generating ${topProduct.revenueFormatted} in revenue.`,
+        ? `यो सामानले ${topProduct.sold} ${context.lang === 'ne' ? 'वटा' : 'units'} बिक्री गरी ${money(topProduct.revenue, context.lang)} रकम उठाएको छ।`
+        : `This product sold ${topProduct.sold} units generating ${money(topProduct.revenue, context.lang)} in revenue.`,
       why: context.lang === 'ne'
         ? `पछिल्ला बिक्रीमध्ये यसको मात्रा सबैभन्दा धेरै छ। नाफा प्रतिशत: ${topProduct.margin}%।`
         : `It has the highest sales volume in recent records. Profit margin: ${topProduct.margin}%.`,
@@ -120,8 +120,8 @@ export function generateInsights(context) {
         ? `यो हप्ताको बिक्री गत हप्ताको तुलनामा ${Math.abs(context.week.vsLastWeek)}% ${isPositive ? 'बढेको' : 'घटेको'} छ।`
         : `This week's sales are ${Math.abs(context.week.vsLastWeek)}% ${isPositive ? 'higher' : 'lower'} than last week.`,
       why: context.lang === 'ne'
-        ? `गत हप्ता रकम: ${context.week.revenueFormatted}। यस हप्ता: ${money(context.week.revenue, context.lang)}।`
-        : `Last week: ${context.week.revenueFormatted}. This week: ${money(context.week.revenue, context.lang)}.`,
+        ? `गत हप्ता रकम: ${money(context.week.lastWeekRevenue, context.lang)}। यस हप्ता: ${money(context.week.revenue, context.lang)}।`
+        : `Last week: ${money(context.week.lastWeekRevenue, context.lang)}. This week: ${money(context.week.revenue, context.lang)}.`,
       action: {
         label: context.lang === 'ne' ? 'विश्लेषण हेर्नुहोस्' : 'View Analytics',
         route: 'analytics',
@@ -130,7 +130,7 @@ export function generateInsights(context) {
       data: {
         change: context.week.vsLastWeek,
         thisWeek: context.week.revenue,
-        lastWeek: context.week.revenue - (context.week.revenue * context.week.vsLastWeek / 100),
+        lastWeek: context.week.lastWeekRevenue,
       },
       icon: isPositive ? 'trending_up' : 'trending_down',
     });
@@ -150,8 +150,8 @@ export function generateInsights(context) {
         ? `आजको बिक्री हिजोको तुलनामा ${Math.abs(context.today.vsYesterday)}% ${isPositive ? 'बढी' : 'कम'} छ।`
         : `Today's sales are ${Math.abs(context.today.vsYesterday)}% ${isPositive ? 'higher' : 'lower'} than yesterday.`,
       why: context.lang === 'ne'
-        ? `हिजो: ${money(context.today.revenue - (context.today.revenue * context.today.vsYesterday / 100), context.lang)}। आज: ${context.today.revenueFormatted}।`
-        : `Yesterday: ${money(context.today.revenue - (context.today.revenue * context.today.vsYesterday / 100), context.lang)}. Today: ${context.today.revenueFormatted}.`,
+        ? `हिजो: ${money(context.today.yesterdayRevenue, context.lang)}। आज: ${context.today.revenueFormatted}।`
+        : `Yesterday: ${money(context.today.yesterdayRevenue, context.lang)}. Today: ${context.today.revenueFormatted}.`,
       action: {
         label: context.lang === 'ne' ? 'बिक्री हेर्नुहोस्' : 'View Sales',
         route: 'sales',

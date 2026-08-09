@@ -1,6 +1,16 @@
 const DAY = 86_400_000;
 
-export const demoProfile = { shopName: 'Asha Kirana Pasal', ownerName: 'Asha Shrestha', shopType: 'Kirana', location: 'Lalitpur, Nepal', currency: 'NPR / Rs.' };
+export const demoProfile = {
+  shopName: 'Asha Kirana Pasal',
+  ownerName: 'Asha Shrestha',
+  shopType: 'Kirana',
+  location: 'Lalitpur, Nepal',
+  currency: 'NPR / Rs.',
+  vatEnabled: false,
+  vatRegistrationNumber: '',
+  vatRate: 13,
+  pricesIncludeVat: true,
+};
 
 export const demoProducts = [
   ['p1', 'Milk', 'दूध', 'Dairy', 48, 60, 18, 8, 48],
